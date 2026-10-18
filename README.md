@@ -7,9 +7,11 @@ servidor externo**, o que permite funcionar em sistema fechado.
 ## Como usar
 
 1. Recarregue a extensão em `chrome://extensions` (modo desenvolvedor → “Recarregar”).
-2. Abra a tela de execução do checklist no NDPd e expanda a seção desejada.
-3. Clique no ícone da extensão. O popup analisa a aba automaticamente.
-4. Use **↻** ou **Analisar** para reanalisar e **JSON** / **CSV** para exportar.
+2. Abra a tela de execução do checklist no NDPd.
+3. Clique no ícone da extensão. O popup coleta **todas as seções** automaticamente
+   (ele percorre o menu lateral, renderiza cada seção e volta para a seção original).
+4. Use **↻** / **Coletar tudo** para reexecutar, **Seção atual** para ler só o que está
+   aberto, e **JSON** / **CSV** para exportar.
 
 ## O que a análise entrega
 
@@ -26,11 +28,19 @@ servidor externo**, o que permite funcionar em sistema fechado.
   preenchidos, anexos (com miniatura) e problemas.
 - **Exportação:** JSON completo e CSV (separador `;`, com BOM para Excel pt-BR).
 
-## Limitação importante
+## Coleta de todas as seções
 
-O Angular renderiza **somente a seção ativa** no DOM. As demais seções aparecem apenas no
-menu lateral com a contagem — por isso elas são listadas como “não renderizadas”, e a
-validação item a item cobre apenas a seção aberta no momento da análise.
+O Angular renderiza **somente a seção ativa** no DOM. Para coletar tudo, o content script:
+
+1. lê a lista de seções do menu lateral (`app-checklist-side-sections`);
+2. clica em cada seção, aguarda o conteúdo renderizar e ficar estável;
+3. extrai os casos de teste daquele momento;
+4. ao final, reativa a seção que estava aberta antes da coleta.
+
+Se alguma seção não puder ser carregada, ela é registrada como
+“Não foi possível carregar a seção … para coleta” nas validações, e as demais são
+coletadas normalmente. Para conferir contra a contagem do menu lateral, a extensão
+compara o `badge` (ex.: `10/10`) com o que foi lido no DOM de cada seção.
 
 ## Arquivos
 

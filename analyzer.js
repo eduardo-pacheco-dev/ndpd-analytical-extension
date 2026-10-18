@@ -1,5 +1,5 @@
 // NDPd checklist analyzer — pure DOM reading, no network access.
-// Loaded as a content script before content.js and also available for reuse.
+// Exposes helpers used by content.js to scrape every section of the checklist.
 (function () {
   "use strict";
 
@@ -54,16 +54,16 @@
     return "unknown";
   }
 
+  function firstStatusIn(root) {
+    if (!root) return null;
+    return root.querySelector(STATUS_SELECTOR);
+  }
+
   function headerElement(node) {
     for (const child of node.children) {
       if (child.tagName === "DIV") return child;
     }
     return node.firstElementChild || null;
-  }
-
-  function firstStatusIn(root) {
-    if (!root) return null;
-    return root.querySelector(STATUS_SELECTOR);
   }
 
   function parseBadge(text) {
@@ -78,7 +78,7 @@
 
   function readSections(doc) {
     const nodes = doc.querySelectorAll("app-checklist-side-sections .sidebar-item");
-    return Array.from(nodes).map((node) => {
+    return Array.from(nodes).map((node, index) => {
       const labelEl = node.querySelector(".label");
       const codeEl = node.querySelector(".bold-label");
       const badgeEl = node.querySelector(".badge");
@@ -86,6 +86,7 @@
       const fullLabel = clean(labelEl ? labelEl.textContent : node.textContent);
       const code = clean(codeEl ? codeEl.textContent : "");
       return {
+        index,
         code,
         name: code && fullLabel.startsWith(code) ? clean(fullLabel.slice(code.length)) : fullLabel,
         label: fullLabel,
@@ -94,6 +95,7 @@
         badgeTotal: badge.total,
         active: node.classList.contains("active"),
         counts: null,
+        rendered: false,
       };
     });
   }
@@ -253,6 +255,44 @@
     return issues;
   }
 
+  function parseItem(node, index, section) {
+    const header = headerElement(node);
+    const nameEl = node.querySelector("h4.testcase-name-overflow") || node.querySelector("h4");
+    const name = clean(nameEl ? nameEl.textContent : `Item ${index}`);
+    const headerText = clean(header ? header.textContent : "");
+    const requirement = /\*Required/i.test(headerText)
+      ? "required"
+      : /\bOptional\b/i.test(headerText)
+        ? "optional"
+        : "unknown";
+    const statusEl = firstStatusIn(header);
+    const status = statusEl ? readStatus(statusEl) : "unknown";
+
+    const item = {
+      index,
+      name,
+      requirement,
+      requirementLabel: REQUIREMENT_LABEL[requirement],
+      status,
+      statusLabel: statusEl ? clean(statusEl.textContent) : STATUS_LABEL[status],
+      sectionCode: section ? section.code : "",
+      sectionLabel: section ? section.label : "",
+      radio: readRadio(node),
+      inputs: readInputs(node),
+      attachments: readAttachments(node),
+      issues: [],
+    };
+
+    item.issues = buildItemIssues(item);
+    return item;
+  }
+
+  // Reads the test cases rendered in the currently active section.
+  function readItems(doc, section) {
+    const nodes = doc.querySelectorAll(".checklist .content-body .content-item");
+    return Array.from(nodes).map((node, index) => parseItem(node, index + 1, section));
+  }
+
   function analyzeDocument(doc, location) {
     const root = doc.querySelector("app-checklist-execution-special");
     if (!root) {
@@ -262,45 +302,38 @@
     }
 
     const sections = readSections(doc);
-    const items = Array.from(doc.querySelectorAll(".checklist .content-body .content-item")).map(
-      (node, index) => {
-        const header = headerElement(node);
-        const nameEl =
-          node.querySelector("h4.testcase-name-overflow") || node.querySelector("h4");
-        const name = clean(nameEl ? nameEl.textContent : `Item ${index + 1}`);
-        const headerText = clean(header ? header.textContent : "");
-        const requirement = /\*Required/i.test(headerText)
-          ? "required"
-          : /\bOptional\b/i.test(headerText)
-            ? "optional"
-            : "unknown";
-        const statusEl = firstStatusIn(header);
-        const status = statusEl ? readStatus(statusEl) : "unknown";
+    const activeIndex = sections.findIndex((section) => section.active);
+    const active = activeIndex >= 0 ? sections[activeIndex] : null;
+    const items = readItems(doc, active);
 
-        const item = {
-          index: index + 1,
-          name,
-          requirement,
-          requirementLabel: REQUIREMENT_LABEL[requirement],
-          status,
-          statusLabel: statusEl ? clean(statusEl.textContent) : STATUS_LABEL[status],
-          radio: readRadio(node),
-          inputs: readInputs(node),
-          attachments: readAttachments(node),
-          issues: [],
-        };
+    return buildReport(doc, location, [{ sectionIndex: activeIndex, section: active, items, rendered: true }], "active");
+  }
 
-        item.issues = buildItemIssues(item);
-        return item;
-      }
-    );
+  // Builds the final report from one or more collected sections.
+  function buildReport(doc, location, collected, mode) {
+    const sections = readSections(doc);
+    const sectionByIndex = new Map();
+    for (const entry of collected) {
+      if (entry.section) sectionByIndex.set(entry.sectionIndex, entry);
+    }
 
-    const activeSectionIndex = sections.findIndex((section) => section.active);
-    const activeSection = activeSectionIndex >= 0 ? sections[activeSectionIndex] : null;
+    // Fill counts/rendered flags by DOM order.
+    const orderedSections = sections.map((section) => {
+      const entry = sectionByIndex.get(section.index);
+      if (!entry) return section;
+      const accepted = entry.items.filter((item) => item.status === "accepted").length;
+      return Object.assign({}, section, {
+        rendered: entry.rendered,
+        counts: { accepted, total: entry.items.length },
+      });
+    });
+
+    const items = collected.reduce((all, entry) => all.concat(entry.items), []);
+
     const countedStatuses = ["accepted", "rejected", "pending", "performed"];
-
     const summary = {
       sections: sections.length,
+      sectionsCollected: collected.filter((entry) => entry.rendered).length,
       items: items.length,
       accepted: items.filter((item) => item.status === "accepted").length,
       rejected: items.filter((item) => item.status === "rejected").length,
@@ -314,48 +347,75 @@
           total + item.attachments.filter((attachment) => attachment.status === "rejected").length,
         0
       ),
-      issues: items.reduce((total, item) => total + item.issues.length, 0),
+      issues: 0,
       errors: 0,
       warnings: 0,
     };
 
     const issues = [];
+
     for (const item of items) {
       for (const issue of item.issues) {
         issues.push({
           ...issue,
           itemIndex: item.index,
           itemName: item.name,
-          section: activeSection ? activeSection.label : "",
+          section: item.sectionLabel,
         });
       }
     }
 
-    // Cross-check sidebar badge against the DOM of the active section.
-    if (activeSection) {
-      const computed = {
-        accepted: summary.accepted,
-        total: summary.items,
-      };
-      activeSection.counts = computed;
+    for (const entry of collected) {
+      const section = entry.section;
+      const label = section ? section.label : "";
 
-      if (
-        activeSection.badgeAccepted != null &&
-        activeSection.badgeAccepted !== computed.accepted
-      ) {
+      if (!entry.rendered) {
         issues.push({
           severity: "warning",
-          code: "badge-mismatch-accepted",
-          message: `Menu lateral indica ${activeSection.badgeAccepted} aceito(s), mas o DOM mostra ${computed.accepted}.`,
-          section: activeSection.label,
+          code: "section-not-loaded",
+          message: `Não foi possível carregar a seção "${label}" para coleta.`,
+          section: label,
         });
+        continue;
       }
-      if (activeSection.badgeTotal != null && activeSection.badgeTotal !== computed.total) {
+
+      if (section && section.badgeAccepted != null) {
+        const accepted = entry.items.filter((item) => item.status === "accepted").length;
+        if (section.badgeAccepted !== accepted) {
+          issues.push({
+            severity: "warning",
+            code: "badge-mismatch-accepted",
+            message: `Menu lateral indica ${section.badgeAccepted} aceito(s), mas o DOM mostra ${accepted}.`,
+            section: label,
+          });
+        }
+      }
+      if (section && section.badgeTotal != null && section.badgeTotal !== entry.items.length) {
         issues.push({
           severity: "warning",
           code: "badge-mismatch-total",
-          message: `Menu lateral indica ${activeSection.badgeTotal} item(ns), mas o DOM mostra ${computed.total}.`,
-          section: activeSection.label,
+          message: `Menu lateral indica ${section.badgeTotal} item(ns), mas o DOM mostra ${entry.items.length}.`,
+          section: label,
+        });
+      }
+
+      // Duplicate attachment names inside the same section.
+      const byName = new Map();
+      for (const item of entry.items) {
+        for (const attachment of item.attachments) {
+          const key = attachment.name.toLowerCase();
+          if (!key) continue;
+          if (!byName.has(key)) byName.set(key, []);
+          byName.get(key).push(item.index);
+        }
+      }
+      for (const [name, indexes] of byName) {
+        if (indexes.length < 2) continue;
+        issues.push({
+          severity: "warning",
+          code: "attachment-duplicate",
+          message: `Nome de anexo duplicado "${name}" nos itens ${indexes.map((i) => "#" + i).join(", ")}.`,
+          section: label,
         });
       }
     }
@@ -364,29 +424,7 @@
       issues.push({
         severity: "warning",
         code: "no-items",
-        message:
-          "Nenhum caso de teste foi encontrado no DOM. A seção ativa pode não estar renderizada.",
-      });
-    }
-
-    // Duplicate attachment names across the active section.
-    const byName = new Map();
-    for (const item of items) {
-      for (const attachment of item.attachments) {
-        const key = attachment.name.toLowerCase();
-        if (!key) continue;
-        if (!byName.has(key)) byName.set(key, []);
-        byName.get(key).push({ item, attachment });
-      }
-    }
-    for (const [name, occurrences] of byName) {
-      if (occurrences.length < 2) continue;
-      const where = occurrences.map((entry) => `#${entry.item.index}`).join(", ");
-      issues.push({
-        severity: "warning",
-        code: "attachment-duplicate",
-        message: `Nome de anexo duplicado "${name}" nos itens ${where}.`,
-        section: activeSection ? activeSection.label : "",
+        message: "Nenhum caso de teste foi encontrado no DOM.",
       });
     }
 
@@ -394,28 +432,43 @@
     summary.warnings = issues.filter((issue) => issue.severity === "warning").length;
     summary.issues = issues.length;
 
+    const notes = [
+      "Os dados são lidos diretamente da página aberta, sem acesso a servidores externos.",
+      "Validações automáticas são indicativas e não substituem a conferência humana.",
+    ];
+    if (mode === "all") {
+      notes.unshift(
+        `Coleta completa: ${summary.sectionsCollected}/${summary.sections} seção(ões) renderizada(s) e coletada(s).`
+      );
+    } else {
+      notes.unshift(
+        "Modo seção ativa: apenas a seção aberta foi analisada. Use \"Coletar tudo\" para percorrer todas."
+      );
+    }
+
     return {
       generatedAt: new Date().toISOString(),
+      mode,
       page: {
         title: clean(doc.title),
         url: location.href,
       },
       workOrder: readWorkOrder(doc, location),
-      sections,
-      activeSection,
+      sections: orderedSections,
       items,
       summary,
       issues,
-      notes: [
-        "Somente a seção ativa é renderizada no DOM; as demais aparecem no menu lateral apenas com a contagem.",
-        "Os dados são lidos diretamente da página aberta, sem acesso a servidores externos.",
-        "Validações automáticas são indicativas e não substituem a conferência humana.",
-      ],
+      notes,
     };
   }
 
   window.NdPdAnalyzer = {
     analyzeDocument,
+    buildReport,
+    readItems,
+    readSections,
+    readWorkOrder,
+    clean,
     STATUS_LABEL,
     REQUIREMENT_LABEL,
   };

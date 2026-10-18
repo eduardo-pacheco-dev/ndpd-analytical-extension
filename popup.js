@@ -13,9 +13,11 @@ const notesEl = document.getElementById("notes");
 const jsonBtn = document.getElementById("export-json");
 const csvBtn = document.getElementById("export-csv");
 const refreshBtn = document.getElementById("refresh");
-const reanalyzeBtn = document.getElementById("reanalyze");
+const activeBtn = document.getElementById("analyze-active");
+const allBtn = document.getElementById("analyze-all");
 
 let currentResult = null;
+let collecting = false;
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -32,6 +34,15 @@ function queryTabs(query) {
       resolve(tabs || []);
     });
   });
+}
+
+function tabHost(tab) {
+  if (!tab || !tab.url) return null;
+  try {
+    return new URL(tab.url).hostname;
+  } catch (error) {
+    return null;
+  }
 }
 
 async function getActiveTab() {
@@ -55,9 +66,9 @@ async function getActiveTab() {
   return activeTab;
 }
 
-function sendAnalyze(tabId) {
+function sendAnalyze(tabId, type) {
   return new Promise((resolve, reject) => {
-    chrome.tabs.sendMessage(tabId, { type: "NDPD_ANALYZE" }, (response) => {
+    chrome.tabs.sendMessage(tabId, { type }, (response) => {
       const error = chrome.runtime.lastError;
       if (error) return reject(new Error(error.message));
       if (!response) return reject(new Error("A página não respondeu."));
@@ -84,15 +95,6 @@ function injectAnalyzer(tabId) {
   });
 }
 
-function tabHost(tab) {
-  if (!tab || !tab.url) return null;
-  try {
-    return new URL(tab.url).hostname;
-  } catch (error) {
-    return null;
-  }
-}
-
 function friendlyError(tab, error) {
   const host = tabHost(tab);
   if (host && !NDPD_HOST_PATTERN.test(host)) {
@@ -109,8 +111,11 @@ function friendlyError(tab, error) {
   );
 }
 
-async function analyze() {
-  setLoading(true);
+async function analyze(mode) {
+  const type = mode === "active" ? "NDPD_ANALYZE" : "NDPD_ANALYZE_ALL";
+  setLoading(true, mode === "active" ? "Analisando a seção ativa…" : "Coletando todas as seções…");
+  collecting = true;
+
   try {
     const tab = await getActiveTab();
     if (tab.id == null) throw new Error("Não foi possível identificar a aba ativa.");
@@ -124,15 +129,13 @@ async function analyze() {
 
     let data;
     try {
-      data = await sendAnalyze(tab.id);
+      data = await sendAnalyze(tab.id, type);
     } catch (firstError) {
-      // Real analysis errors (page opened but checklist not found) must surface as-is.
       if (firstError.analysis) throw firstError;
 
-      // Content script may not be present (extension just reloaded) — inject and retry.
       try {
         await injectAnalyzer(tab.id);
-        data = await sendAnalyze(tab.id);
+        data = await sendAnalyze(tab.id, type);
       } catch (secondError) {
         throw new Error(friendlyError(tab, secondError));
       }
@@ -145,16 +148,18 @@ async function analyze() {
     currentResult = null;
     renderError(error.message || String(error));
     setLoading(false, "Falha na análise");
+  } finally {
+    collecting = false;
   }
 }
 
 function setLoading(isLoading, message) {
   refreshBtn.disabled = isLoading;
-  reanalyzeBtn.disabled = isLoading;
+  activeBtn.disabled = isLoading;
+  allBtn.disabled = isLoading;
   jsonBtn.disabled = isLoading || !currentResult;
   csvBtn.disabled = isLoading || !currentResult;
   if (message) statusEl.textContent = message;
-  else if (isLoading) statusEl.textContent = "Analisando a aba atual…";
 }
 
 function renderError(message) {
@@ -192,14 +197,12 @@ function renderWorkOrder(data) {
   const meta = [];
   if (order.header && order.header !== title) meta.push(order.header);
   if (order.smpId) meta.push("SMP: " + order.smpId);
-  if (data.activeSection) meta.push("Seção ativa: " + data.activeSection.label);
-  if (data.page && data.page.url) {
-    try {
-      meta.push(new URL(data.page.url).pathname);
-    } catch (error) {
-      meta.push(data.page.url);
-    }
+  if (data.summary) {
+    meta.push(
+      "Seções coletadas: " + data.summary.sectionsCollected + "/" + data.summary.sections
+    );
   }
+  meta.push(data.mode === "active" ? "modo: seção ativa" : "modo: coleta completa");
   workorderEl.appendChild(el("div", "wo-meta", meta.join("  •  ")));
 }
 
@@ -234,13 +237,19 @@ function renderIssues(issues) {
 
   for (const issue of sorted) {
     const row = el("div", "issue " + issue.severity);
-    row.appendChild(el("span", "tag", issue.severity === "error" ? "Erro" : issue.severity === "warning" ? "Alerta" : "Info"));
+    row.appendChild(
+      el(
+        "span",
+        "tag",
+        issue.severity === "error" ? "Erro" : issue.severity === "warning" ? "Alerta" : "Info"
+      )
+    );
 
     const body = el("div", null);
     body.appendChild(el("span", null, issue.message));
     const where = [];
+    if (issue.section) where.push(issue.section);
     if (issue.itemName) where.push("#" + issue.itemIndex + " " + issue.itemName);
-    else if (issue.section) where.push(issue.section);
     if (where.length) body.appendChild(el("span", "where", where.join("  •  ")));
     row.appendChild(body);
 
@@ -258,11 +267,13 @@ function renderSections(data) {
   for (const section of data.sections) {
     const row = el("div", "section-row" + (section.active ? " active" : ""));
     const top = el("div", "section-top");
-    top.appendChild(el("span", "section-name", (section.code ? section.code + " " : "") + section.name));
+    top.appendChild(
+      el("span", "section-name", (section.code ? section.code + " " : "") + section.name)
+    );
     top.appendChild(el("span", "section-badge", section.badge || "—"));
     row.appendChild(top);
 
-    if (section.active && section.counts) {
+    if (section.counts) {
       const total = section.counts.total || 0;
       const accepted = section.counts.accepted || 0;
       const percent = total > 0 ? Math.round((accepted / total) * 100) : 0;
@@ -274,11 +285,10 @@ function renderSections(data) {
       bar.appendChild(fill);
       row.appendChild(bar);
 
-      const note = "DOM: " + accepted + "/" + total + " aceitos (" + percent + "%)";
-      row.appendChild(el("div", "section-note", note));
+      row.appendChild(el("div", "section-note", "DOM: " + accepted + "/" + total + " aceitos (" + percent + "%)"));
     } else {
       row.appendChild(
-        el("div", "section-note", "Somente contagem do menu lateral (seção não renderizada).")
+        el("div", "section-note", "Não coletada (menu lateral apenas com contagem).")
       );
     }
 
@@ -296,7 +306,7 @@ function detail(key, value) {
 function renderItems(items) {
   itemsEl.textContent = "";
   if (!items || items.length === 0) {
-    itemsEl.appendChild(el("div", "empty", "Nenhum caso de teste renderizado na seção ativa."));
+    itemsEl.appendChild(el("div", "empty", "Nenhum caso de teste encontrado."));
     return;
   }
 
@@ -310,15 +320,14 @@ function renderItems(items) {
     main.appendChild(el("span", "item-name", "#" + item.index + "  " + item.name));
 
     const sub = el("div", "item-sub");
+    if (item.sectionCode) sub.appendChild(el("span", "pill", item.sectionCode));
     sub.appendChild(el("span", "pill", item.statusLabel || item.status));
     sub.appendChild(
-      el(
-        "span",
-        "pill " + (item.requirement === "required" ? "req" : "opt"),
-        item.requirementLabel
-      )
+      el("span", "pill " + (item.requirement === "required" ? "req" : "opt"), item.requirementLabel)
     );
-    if (item.radio && item.radio.answer) sub.appendChild(el("span", "pill", "Resposta: " + item.radio.answer));
+    if (item.radio && item.radio.answer) {
+      sub.appendChild(el("span", "pill", "Resposta: " + item.radio.answer));
+    }
     if (item.attachments.length) sub.appendChild(el("span", "pill", item.attachments.length + " anexo(s)"));
     if (item.issues.length) sub.appendChild(el("span", "pill", item.issues.length + " problema(s)"));
     main.appendChild(sub);
@@ -327,6 +336,7 @@ function renderItems(items) {
     details.appendChild(summary);
 
     const body = el("div", "item-body");
+    if (item.sectionLabel) body.appendChild(detail("Seção", item.sectionLabel));
 
     if (item.radio) {
       body.appendChild(
@@ -341,7 +351,12 @@ function renderItems(items) {
 
     const filledInputs = item.inputs.filter((input) => input.value);
     if (filledInputs.length) {
-      body.appendChild(detail("Campos preenchidos", filledInputs.map((input) => (input.label ? input.label + " = " : "") + input.value).join("  •  ")));
+      body.appendChild(
+        detail(
+          "Campos preenchidos",
+          filledInputs.map((input) => (input.label ? input.label + " = " : "") + input.value).join("  •  ")
+        )
+      );
     }
 
     if (item.attachments.length) {
@@ -357,13 +372,12 @@ function renderItems(items) {
         }
       }
       body.appendChild(thumbs);
+
       const list = el("ul");
       for (const attachment of item.attachments) {
         const li = el("li", attachment.status === "rejected" ? "error" : null);
         li.textContent =
-          (attachment.name || "(sem nome)") +
-          " — " +
-          (attachment.statusLabel || attachment.status);
+          (attachment.name || "(sem nome)") + " — " + (attachment.statusLabel || attachment.status);
         list.appendChild(li);
       }
       body.appendChild(list);
@@ -430,17 +444,18 @@ function exportCsv() {
     ["Secao", "Item", "Obrigatoriedade", "Status", "Resposta", "Anexos", "Anexos rejeitados", "Anexos sem nome", "Campos", "Problemas"],
   ];
 
-  const activeLabel = currentResult.activeSection ? currentResult.activeSection.label : "";
-
   for (const item of currentResult.items) {
     rows.push([
-      activeLabel,
+      (item.sectionCode ? item.sectionCode + " " : "") + item.sectionLabel,
       "#" + item.index + " " + item.name,
       item.requirementLabel,
       item.statusLabel || item.status,
       item.radio && item.radio.answer ? item.radio.answer : "",
       item.attachments
-        .map((attachment) => (attachment.name || "(sem nome)") + " [" + (attachment.statusLabel || attachment.status) + "]")
+        .map(
+          (attachment) =>
+            (attachment.name || "(sem nome)") + " [" + (attachment.statusLabel || attachment.status) + "]"
+        )
         .join(" | "),
       item.attachments.filter((attachment) => attachment.status === "rejected").length,
       item.attachments.filter((attachment) => !attachment.name).length,
@@ -465,9 +480,21 @@ function exportJson() {
   );
 }
 
-refreshBtn.addEventListener("click", analyze);
-reanalyzeBtn.addEventListener("click", analyze);
+chrome.runtime.onMessage.addListener((message) => {
+  if (!message || message.type !== "NDPD_PROGRESS" || !collecting) return;
+  const progress = message.progress || {};
+  if (progress.done) {
+    statusEl.textContent = "Montando relatório…";
+    return;
+  }
+  statusEl.textContent =
+    "Coletando seção " + progress.current + "/" + progress.total + ": " + (progress.label || "");
+});
+
+refreshBtn.addEventListener("click", () => analyze("all"));
+allBtn.addEventListener("click", () => analyze("all"));
+activeBtn.addEventListener("click", () => analyze("active"));
 jsonBtn.addEventListener("click", exportJson);
 csvBtn.addEventListener("click", exportCsv);
 
-analyze();
+analyze("all");
