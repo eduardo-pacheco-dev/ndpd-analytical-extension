@@ -66,9 +66,20 @@ async function getActiveTab() {
   return activeTab;
 }
 
-function sendAnalyze(tabId, type) {
+function sendAnalyze(tabId, type, timeoutMs) {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error("Tempo esgotado ao aguardar a página (coleta muito longa ou página travada)."));
+    }, timeoutMs);
+
     chrome.tabs.sendMessage(tabId, { type }, (response) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+
       const error = chrome.runtime.lastError;
       if (error) return reject(new Error(error.message));
       if (!response) return reject(new Error("A página não respondeu."));
@@ -104,6 +115,12 @@ function friendlyError(tab, error) {
   if (/cannot access|not allowed|extension manifest/i.test(message)) {
     return "Sem permissão para ler esta página. Confirme que a URL é do NDPd e recarregue a extensão.";
   }
+  if (/message port closed|receiving end does not exist/i.test(message)) {
+    return (
+      "A página está com uma versão antiga do content script. Recarregue a aba do NDPd (F5) " +
+      "e clique em Coletar tudo."
+    );
+  }
   return (
     "Não foi possível ler a página do NDPd (" +
     message +
@@ -113,6 +130,7 @@ function friendlyError(tab, error) {
 
 async function analyze(mode) {
   const type = mode === "active" ? "NDPD_ANALYZE" : "NDPD_ANALYZE_ALL";
+  const timeout = type === "NDPD_ANALYZE_ALL" ? 180000 : 30000;
   setLoading(true, mode === "active" ? "Analisando a seção ativa…" : "Coletando todas as seções…");
   collecting = true;
 
@@ -120,6 +138,7 @@ async function analyze(mode) {
     const tab = await getActiveTab();
     if (tab.id == null) throw new Error("Não foi possível identificar a aba ativa.");
     const host = tabHost(tab);
+    console.info("[NDPd Analytical] analisando aba", tab.id, host || "(host indisponível)", type);
 
     if (host && !NDPD_HOST_PATTERN.test(host)) {
       throw new Error(
@@ -129,13 +148,14 @@ async function analyze(mode) {
 
     let data;
     try {
-      data = await sendAnalyze(tab.id, type);
+      data = await sendAnalyze(tab.id, type, timeout);
     } catch (firstError) {
       if (firstError.analysis) throw firstError;
+      console.info("[NDPd Analytical] primeira tentativa falhou, injetando content script:", firstError.message);
 
       try {
         await injectAnalyzer(tab.id);
-        data = await sendAnalyze(tab.id, type);
+        data = await sendAnalyze(tab.id, type, timeout);
       } catch (secondError) {
         throw new Error(friendlyError(tab, secondError));
       }
@@ -144,10 +164,18 @@ async function analyze(mode) {
     currentResult = data;
     render(data);
     setLoading(false, "Análise atualizada às " + new Date().toLocaleTimeString("pt-BR"));
+    console.info(
+      "[NDPd Analytical] relatório pronto:",
+      data.summary.items,
+      "itens,",
+      data.summary.sectionsCollected + "/" + data.summary.sections,
+      "seções coletadas"
+    );
   } catch (error) {
     currentResult = null;
     renderError(error.message || String(error));
     setLoading(false, "Falha na análise");
+    console.warn("[NDPd Analytical] falha:", error.message || String(error));
   } finally {
     collecting = false;
   }

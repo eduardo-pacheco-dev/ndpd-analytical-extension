@@ -3,8 +3,32 @@
 (function () {
   "use strict";
 
-  if (window.__ndpdAnalyticalInjected) return;
-  window.__ndpdAnalyticalInjected = true;
+  const VERSION = 3;
+  const PREFIX = "[NDPd Analytical]";
+
+  function log(...args) {
+    console.info(PREFIX, ...args);
+  }
+
+  function warn(...args) {
+    console.warn(PREFIX, ...args);
+  }
+
+  // Versioned guard: a page loaded with an older build may already have a (now stale)
+  // content script attached, so we must not skip registering the current listener.
+  const registered = window.__ndpdAnalytical;
+  if (registered && registered.version === VERSION && registered.listener) {
+    log("content script v" + VERSION + " já registrado; ignorando duplicata.");
+    return;
+  }
+  if (registered && registered.listener) {
+    try {
+      chrome.runtime.onMessage.removeListener(registered.listener);
+      log("listener anterior removido (v" + registered.version + ").");
+    } catch (error) {
+      warn("não foi possível remover listener anterior:", error && error.message);
+    }
+  }
 
   function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -89,6 +113,8 @@
     const sections = analyzer.readSections(doc);
     const collected = [];
 
+    log("iniciando coleta:", sections.length, "seção(ões); ativa =", originalIndex);
+
     for (let index = 0; index < sections.length; index += 1) {
       const current = analyzer.readSections(doc)[index] || sections[index];
       if (onProgress) {
@@ -98,37 +124,41 @@
       const rendered = await activateSection(doc, index);
       const fresh = analyzer.readSections(doc)[index] || current;
       const items = rendered ? analyzer.readItems(doc, fresh) : [];
+      log(`seção ${index + 1}/${sections.length} "${current.label}" renderizada=${rendered} itens=${items.length}`);
       collected.push({ sectionIndex: index, section: fresh, items, rendered });
     }
 
     if (originalIndex >= 0 && activeIndex(doc) !== originalIndex) {
       await activateSection(doc, originalIndex);
+      log("seção original restaurada:", originalIndex);
     }
 
     if (onProgress) onProgress({ current: sections.length, total: sections.length, done: true });
-    return analyzer.buildReport(doc, location, collected, "all");
+
+    const report = analyzer.buildReport(doc, location, collected, "all");
+    log(
+      "coleta concluída: itens =",
+      report.summary.items,
+      "| problemas =",
+      report.summary.issues
+    );
+    return report;
   }
 
   function analyzeActiveSection() {
     return window.NdPdAnalyzer.analyzeDocument(document, window.location);
   }
 
-  // Exposed for tests/diagnostics.
-  window.NdPdScraper = {
-    collectAllSections,
-    activateSection,
-    activeIndex,
-    contentSignature,
-  };
-
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  function handleMessage(message, _sender, sendResponse) {
     if (!message) return undefined;
 
     if (message.type === "NDPD_ANALYZE_ALL") {
+      log("recebido NDPD_ANALYZE_ALL");
       if (!window.NdPdAnalyzer) {
         sendResponse({ ok: false, error: "Analisador não carregado nesta página." });
         return undefined;
       }
+
       collectAllSections((progress) => {
         try {
           chrome.runtime.sendMessage({ type: "NDPD_PROGRESS", progress });
@@ -137,13 +167,15 @@
         }
       })
         .then((data) => sendResponse({ ok: true, data }))
-        .catch((error) =>
-          sendResponse({ ok: false, error: error && error.message ? error.message : String(error) })
-        );
+        .catch((error) => {
+          warn("falha na coleta:", error && error.message);
+          sendResponse({ ok: false, error: error && error.message ? error.message : String(error) });
+        });
       return true; // keep the channel open for the async response
     }
 
     if (message.type === "NDPD_ANALYZE") {
+      log("recebido NDPD_ANALYZE");
       try {
         sendResponse({ ok: true, data: analyzeActiveSection() });
       } catch (error) {
@@ -153,5 +185,25 @@
     }
 
     return undefined;
-  });
+  }
+
+  chrome.runtime.onMessage.addListener(handleMessage);
+  window.__ndpdAnalytical = { version: VERSION, listener: handleMessage };
+
+  // Diagnostics helper (also used by tests): window.__ndpdDiagnostics() in the page console.
+  window.__ndpdDiagnostics = function () {
+    const analyzer = window.NdPdAnalyzer;
+    const info = {
+      version: VERSION,
+      url: location.href,
+      recognized: Boolean(document.querySelector("app-checklist-execution-special")),
+      sections: analyzer ? analyzer.readSections(document).map((s) => s.label) : [],
+      activeIndex: activeIndex(document),
+      renderedItems: document.querySelectorAll(".checklist .content-body .content-item").length,
+    };
+    console.info(PREFIX, "diagnóstico", info);
+    return info;
+  };
+
+  log("content script v" + VERSION + " registrado. Use window.__ndpdDiagnostics() para inspecionar a página.");
 })();

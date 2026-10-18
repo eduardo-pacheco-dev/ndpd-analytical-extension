@@ -13,6 +13,19 @@ servidor externo**, o que permite funcionar em sistema fechado.
 4. Use **↻** / **Coletar tudo** para reexecutar, **Seção atual** para ler só o que está
    aberto, e **JSON** / **CSV** para exportar.
 
+> Ao recarregar a extensão em `chrome://extensions`, dê **F5** na aba do NDPd. A extensão
+> detecta um content script antigo e se reinjeta sozinha, mas recarregar a aba garante o
+> estado limpo.
+
+## Diagnóstico
+
+- Console da página (F12 → Console): a extensão loga com o prefixo `[NDPd Analytical]`
+  (registro do content script, cada seção ativada, itens lidos e total).
+- No console da página você pode rodar `window.__ndpdDiagnostics()` para ver versão do
+  content script, se a página foi reconhecida, seções encontradas e a seção ativa.
+- Console do popup (clique direito no popup → Inspecionar) mostra cada tentativa de
+  leitura/injeção e o resumo final.
+
 ## O que a análise entrega
 
 - **Resumo (inventário):** seções, itens, aceitos, rejeitados, pendentes e anexos.
