@@ -1,5 +1,5 @@
 // Popup script — requests the DOM analysis from the active tab and renders it.
-const NDPD_HOST_PATTERN = /deliveryplatform\.nokia\.com$/i;
+const NDPD_HOST_PATTERN = /(^|\.)deliveryplatform\.nokia\.com$/i;
 
 const statusEl = document.getElementById("status");
 const errorEl = document.getElementById("error");
@@ -24,16 +24,35 @@ function el(tag, className, text) {
   return node;
 }
 
-function getActiveTab() {
+function queryTabs(query) {
   return new Promise((resolve, reject) => {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    chrome.tabs.query(query, (tabs) => {
       const error = chrome.runtime.lastError;
       if (error) return reject(new Error(error.message));
-      const tab = tabs && tabs[0];
-      if (!tab || tab.id == null) return reject(new Error("Nenhuma aba ativa."));
-      resolve(tab);
+      resolve(tabs || []);
     });
   });
+}
+
+async function getActiveTab() {
+  const activeTabs = await queryTabs({ active: true, currentWindow: true });
+  const activeTab = activeTabs[0];
+  if (activeTab && NDPD_HOST_PATTERN.test(tabHost(activeTab) || "")) return activeTab;
+
+  // Fallback: the user may have the extension popup open while another window is focused.
+  let ndpdTabs = [];
+  try {
+    ndpdTabs = await queryTabs({ url: "https://*.deliveryplatform.nokia.com/*" });
+  } catch (error) {
+    ndpdTabs = [];
+  }
+  if (ndpdTabs.length > 0) {
+    const sameWindow = ndpdTabs.find((tab) => activeTab && tab.windowId === activeTab.windowId);
+    return sameWindow || ndpdTabs[0];
+  }
+
+  if (!activeTab) throw new Error("Nenhuma aba ativa encontrada.");
+  return activeTab;
 }
 
 function sendAnalyze(tabId) {
@@ -42,7 +61,11 @@ function sendAnalyze(tabId) {
       const error = chrome.runtime.lastError;
       if (error) return reject(new Error(error.message));
       if (!response) return reject(new Error("A página não respondeu."));
-      if (!response.ok) return reject(new Error(response.error || "Falha na análise."));
+      if (!response.ok) {
+        const failure = new Error(response.error || "Falha na análise.");
+        failure.analysis = true;
+        return reject(failure);
+      }
       resolve(response.data);
     });
   });
@@ -61,13 +84,41 @@ function injectAnalyzer(tabId) {
   });
 }
 
+function tabHost(tab) {
+  if (!tab || !tab.url) return null;
+  try {
+    return new URL(tab.url).hostname;
+  } catch (error) {
+    return null;
+  }
+}
+
+function friendlyError(tab, error) {
+  const host = tabHost(tab);
+  if (host && !NDPD_HOST_PATTERN.test(host)) {
+    return "A aba ativa não é do NDPd (" + host + "). Abra a tela de execução do checklist e tente novamente.";
+  }
+  const message = error && error.message ? error.message : String(error);
+  if (/cannot access|not allowed|extension manifest/i.test(message)) {
+    return "Sem permissão para ler esta página. Confirme que a URL é do NDPd e recarregue a extensão.";
+  }
+  return (
+    "Não foi possível ler a página do NDPd (" +
+    message +
+    "). Recarregue a aba (F5) e clique em Analisar."
+  );
+}
+
 async function analyze() {
   setLoading(true);
   try {
     const tab = await getActiveTab();
-    if (!tab.url || !NDPD_HOST_PATTERN.test(new URL(tab.url).hostname)) {
+    if (tab.id == null) throw new Error("Não foi possível identificar a aba ativa.");
+    const host = tabHost(tab);
+
+    if (host && !NDPD_HOST_PATTERN.test(host)) {
       throw new Error(
-        "A aba ativa não é do NDPd. Abra a tela de execução do checklist e clique em Analisar."
+        "A aba ativa não é do NDPd (" + host + "). Abra a tela de execução do checklist."
       );
     }
 
@@ -75,9 +126,16 @@ async function analyze() {
     try {
       data = await sendAnalyze(tab.id);
     } catch (firstError) {
+      // Real analysis errors (page opened but checklist not found) must surface as-is.
+      if (firstError.analysis) throw firstError;
+
       // Content script may not be present (extension just reloaded) — inject and retry.
-      await injectAnalyzer(tab.id);
-      data = await sendAnalyze(tab.id);
+      try {
+        await injectAnalyzer(tab.id);
+        data = await sendAnalyze(tab.id);
+      } catch (secondError) {
+        throw new Error(friendlyError(tab, secondError));
+      }
     }
 
     currentResult = data;

@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "description": "Analisa checklists do NDPd abertos na aba atual: seções, status, respostas, anexos e pendências.",
   "permissions": ["activeTab", "scripting"],
+  "host_permissions": ["https://*.deliveryplatform.nokia.com/*"],
   "action": {
     "default_popup": "popup.html",
     "default_title": "Analisar checklist do NDPd"

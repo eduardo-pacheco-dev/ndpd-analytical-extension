@@ -43,5 +43,7 @@ validação item a item cobre apenas a seção aberta no momento da análise.
 
 ## Permissões
 
-- `activeTab` + `scripting`: injetar/consultar apenas a aba em que o usuário clicou.
-- Sem `host_permissions` amplas e sem chamadas de rede.
+- `activeTab` + `scripting`: injetar/consultar a aba do NDPd.
+- `host_permissions` restrito a `https://*.deliveryplatform.nokia.com/*` (permite ler a URL
+  da aba e injetar o content script sem depender do gesto do usuário).
+- Nenhuma chamada de rede é feita pela extensão.
