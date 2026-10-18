@@ -305,14 +305,6 @@ function renderKpis(data, counts, total) {
   kpisEl.appendChild(
     kpiCard("Anexos", summary.attachments, null, summary.attachmentsRejected + " rejeitado(s)")
   );
-  kpisEl.appendChild(
-    kpiCard(
-      "Problemas",
-      summary.issues,
-      summary.errors ? "err" : summary.warnings ? "warn" : "ok",
-      summary.errors + " erro(s) • " + summary.warnings + " alerta(s)"
-    )
-  );
 }
 
 function renderDonut(counts, total) {
