@@ -12,6 +12,23 @@ servidor externo**, o que permite funcionar em sistema fechado.
    (ele percorre o menu lateral, renderiza cada seção e volta para a seção original).
 4. Use **↻** / **Coletar tudo** para reexecutar, **Seção atual** para ler só o que está
    aberto, e **JSON** / **CSV** para exportar.
+5. Clique em **Dashboard** para abrir o painel visual em uma aba cheia (ideal para print/PDF).
+
+## Dashboard visual
+
+`dashboard.html` abre em aba própria e desenha, sem bibliotecas externas (SVG/CSS puro):
+
+- KPIs: itens, aceitos, rejeitados, pendentes, anexos e problemas;
+- **donut** de status com percentual de aceite;
+- **barras empilhadas** de progresso por seção (aceitos/pendentes/rejeitados/outros);
+- **problemas por tipo** e resumo de erros/alertas;
+- galeria de evidências fotográficas;
+- tabela completa dos casos de teste e lista de validações;
+- botões **Reanalisar** (executa a coleta na aba do NDPd) e **Imprimir / PDF** (com CSS de
+  impressão em tema claro).
+
+O resultado é salvo em `chrome.storage.session` ao coletar, então o dashboard abre já
+preenchido; ele também ouve mudanças no storage e atualiza sozinho.
 
 > Ao recarregar a extensão em `chrome://extensions`, dê **F5** na aba do NDPd. A extensão
 > detecta um content script antigo e se reinjeta sozinha, mas recarregar a aba garante o
@@ -63,10 +80,12 @@ compara o `badge` (ex.: `10/10`) com o que foi lido no DOM de cada seção.
 | `analyzer.js` | Extração e validações (função pura sobre o DOM).                 |
 | `content.js`  | Ponte de mensagens entre popup e página.                         |
 | `popup.html` / `popup.js` | Interface, relatório e exportações.                 |
+| `dashboard.html` / `dashboard.js` | Dashboard visual em aba cheia (gráficos SVG). |
 
 ## Permissões
 
 - `activeTab` + `scripting`: injetar/consultar a aba do NDPd.
 - `host_permissions` restrito a `https://*.deliveryplatform.nokia.com/*` (permite ler a URL
   da aba e injetar o content script sem depender do gesto do usuário).
+- `storage` (apenas `session`): guardar o último relatório para o dashboard.
 - Nenhuma chamada de rede é feita pela extensão.

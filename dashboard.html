@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <title>NDPd Analytical — Dashboard</title>
+    <style>
+      :root {
+        --bg: #070c18;
+        --bg-2: #0d1526;
+        --card: rgba(21, 33, 56, 0.72);
+        --card-solid: #152138;
+        --line: rgba(96, 128, 175, 0.22);
+        --text: #e6edf7;
+        --muted: #8ea3c0;
+        --accent: #38bdf8;
+        --ok: #34d399;
+        --err: #f87171;
+        --warn: #fbbf24;
+        --info: #60a5fa;
+        --purple: #a78bfa;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        background: radial-gradient(1200px 700px at 12% -10%, #16264a 0%, transparent 55%),
+          radial-gradient(1000px 600px at 100% 0%, #0f2f3f 0%, transparent 50%), var(--bg);
+        color: var(--text);
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        min-height: 100%;
+      }
+      a {
+        color: var(--accent);
+      }
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        padding: 18px 28px;
+        background: rgba(7, 12, 24, 0.78);
+        backdrop-filter: blur(10px);
+        border-bottom: 1px solid var(--line);
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .logo {
+        display: grid;
+        place-items: center;
+        width: 42px;
+        height: 42px;
+        border-radius: 12px;
+        background: linear-gradient(135deg, var(--accent), var(--purple));
+        color: #06101f;
+        font-size: 22px;
+        font-weight: 800;
+      }
+      h1 {
+        margin: 0;
+        font-size: 19px;
+        letter-spacing: 0.2px;
+      }
+      .sub {
+        margin: 2px 0 0;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .topbar .meta {
+        flex: 1;
+        min-width: 0;
+        font-size: 12px;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+      .topbar .meta strong {
+        display: block;
+        font-size: 15px;
+        color: var(--text);
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .badge-mode {
+        display: inline-block;
+        margin-left: 8px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: rgba(56, 189, 248, 0.14);
+        color: var(--accent);
+        font-size: 11px;
+        font-weight: 600;
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+      }
+      .actions button {
+        padding: 9px 14px;
+        border-radius: 9px;
+        border: 1px solid var(--line);
+        background: rgba(21, 33, 56, 0.8);
+        color: var(--text);
+        font-size: 12.5px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .actions button.primary {
+        border-color: transparent;
+        background: linear-gradient(135deg, var(--accent), #22d3ee);
+        color: #04121f;
+      }
+      .actions button:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .actions button.primary:hover {
+        color: #04121f;
+        filter: brightness(1.07);
+      }
+      main {
+        padding: 24px 28px 40px;
+        max-width: 1440px;
+        margin: 0 auto;
+      }
+      section.kpis {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 14px;
+        margin-bottom: 18px;
+      }
+      .kpi {
+        position: relative;
+        overflow: hidden;
+        padding: 16px 18px;
+        border-radius: 16px;
+        background: var(--card);
+        border: 1px solid var(--line);
+      }
+      .kpi::after {
+        content: "";
+        position: absolute;
+        inset: auto 0 0 0;
+        height: 3px;
+        background: var(--accent);
+        opacity: 0.85;
+      }
+      .kpi.ok::after {
+        background: var(--ok);
+      }
+      .kpi.err::after {
+        background: var(--err);
+      }
+      .kpi.warn::after {
+        background: var(--warn);
+      }
+      .kpi .num {
+        font-size: 30px;
+        font-weight: 750;
+        line-height: 1.05;
+        letter-spacing: -0.5px;
+      }
+      .kpi .lbl {
+        margin-top: 4px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+        color: var(--muted);
+      }
+      .kpi .hint {
+        margin-top: 6px;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .grid-2 {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 16px;
+        margin-bottom: 16px;
+      }
+      .card {
+        padding: 20px 22px;
+        border-radius: 18px;
+        background: var(--card);
+        border: 1px solid var(--line);
+      }
+      .card h2 {
+        margin: 0 0 16px;
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.7px;
+        color: var(--muted);
+        font-weight: 700;
+      }
+      .donut-wrap {
+        display: flex;
+        align-items: center;
+        gap: 26px;
+        flex-wrap: wrap;
+      }
+      .legend {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 10px;
+        min-width: 180px;
+      }
+      .legend li {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 13px;
+      }
+      .legend .dot {
+        width: 11px;
+        height: 11px;
+        border-radius: 4px;
+        flex: none;
+      }
+      .legend .val {
+        margin-left: auto;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+      .bars {
+        display: grid;
+        gap: 14px;
+      }
+      .bar-row .bar-top {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        font-size: 12.5px;
+        margin-bottom: 7px;
+      }
+      .bar-row .bar-top .label {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .bar-row .bar-top .value {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+        flex: none;
+      }
+      .track {
+        display: flex;
+        height: 12px;
+        border-radius: 999px;
+        overflow: hidden;
+        background: rgba(96, 128, 175, 0.16);
+      }
+      .track span {
+        display: block;
+        height: 100%;
+      }
+      .issue-summary {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+      }
+      .issue-stat {
+        padding: 14px 16px;
+        border-radius: 12px;
+        background: rgba(11, 18, 32, 0.55);
+        border: 1px solid var(--line);
+      }
+      .issue-stat .n {
+        font-size: 24px;
+        font-weight: 700;
+      }
+      .issue-stat .t {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: var(--muted);
+      }
+      .issue-stat.err .n {
+        color: var(--err);
+      }
+      .issue-stat.warn .n {
+        color: var(--warn);
+      }
+      .issues {
+        display: grid;
+        gap: 8px;
+        max-height: 340px;
+        overflow: auto;
+        padding-right: 4px;
+      }
+      .issue {
+        display: flex;
+        gap: 12px;
+        padding: 11px 14px;
+        border-radius: 12px;
+        background: rgba(11, 18, 32, 0.55);
+        border: 1px solid var(--line);
+        border-left: 3px solid var(--info);
+        font-size: 13px;
+      }
+      .issue.error {
+        border-left-color: var(--err);
+      }
+      .issue.warning {
+        border-left-color: var(--warn);
+      }
+      .issue .tag {
+        flex: none;
+        align-self: flex-start;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        background: rgba(96, 165, 250, 0.16);
+        color: var(--info);
+      }
+      .issue.error .tag {
+        background: rgba(248, 113, 113, 0.16);
+        color: var(--err);
+      }
+      .issue.warning .tag {
+        background: rgba(251, 191, 36, 0.16);
+        color: var(--warn);
+      }
+      .issue .where {
+        display: block;
+        margin-top: 3px;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .table-wrap {
+        overflow: auto;
+        max-height: 520px;
+        border-radius: 12px;
+        border: 1px solid var(--line);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12.5px;
+      }
+      thead th {
+        position: sticky;
+        top: 0;
+        background: var(--card-solid);
+        text-align: left;
+        padding: 11px 12px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: var(--muted);
+        border-bottom: 1px solid var(--line);
+        white-space: nowrap;
+      }
+      tbody td {
+        padding: 10px 12px;
+        border-bottom: 1px solid rgba(96, 128, 175, 0.12);
+        vertical-align: top;
+      }
+      tbody tr:hover {
+        background: rgba(56, 189, 248, 0.05);
+      }
+      td.num {
+        text-align: center;
+        font-variant-numeric: tabular-nums;
+      }
+      .chip {
+        display: inline-block;
+        padding: 3px 9px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .chip.accepted {
+        background: rgba(52, 211, 153, 0.16);
+        color: var(--ok);
+      }
+      .chip.rejected {
+        background: rgba(248, 113, 113, 0.16);
+        color: var(--err);
+      }
+      .chip.pending {
+        background: rgba(251, 191, 36, 0.16);
+        color: var(--warn);
+      }
+      .chip.performed {
+        background: rgba(96, 165, 250, 0.16);
+        color: var(--info);
+      }
+      .chip.unknown {
+        background: rgba(142, 163, 192, 0.16);
+        color: var(--muted);
+      }
+      .chip.req {
+        background: rgba(251, 191, 36, 0.14);
+        color: var(--warn);
+      }
+      .chip.opt {
+        background: rgba(142, 163, 192, 0.14);
+        color: var(--muted);
+      }
+      .gallery {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 14px;
+      }
+      .shot {
+        border-radius: 12px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        background: rgba(11, 18, 32, 0.55);
+      }
+      .shot img {
+        width: 100%;
+        height: 120px;
+        object-fit: cover;
+        display: block;
+        background: #0b1220;
+      }
+      .shot .cap {
+        padding: 9px 11px;
+        font-size: 11.5px;
+        line-height: 1.4;
+      }
+      .shot .cap .nm {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .notes-card ul {
+        margin: 0;
+        padding-left: 18px;
+        color: var(--muted);
+        font-size: 12.5px;
+        line-height: 1.6;
+      }
+      .empty {
+        padding: 40px 24px;
+        text-align: center;
+        border-radius: 18px;
+        border: 1px dashed var(--line);
+        color: var(--muted);
+      }
+      .empty h2 {
+        color: var(--text);
+        font-size: 18px;
+        text-transform: none;
+        letter-spacing: 0;
+      }
+      .empty button {
+        margin-top: 12px;
+        padding: 10px 16px;
+        border-radius: 10px;
+        border: none;
+        background: linear-gradient(135deg, var(--accent), #22d3ee);
+        color: #04121f;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .page-foot {
+        padding: 16px 28px 30px;
+        max-width: 1440px;
+        margin: 0 auto;
+        font-size: 11.5px;
+        color: var(--muted);
+      }
+      .hidden {
+        display: none !important;
+      }
+      @media (max-width: 1180px) {
+        section.kpis {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+        .grid-2 {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+      @media print {
+        :root {
+          --bg: #fff;
+          --bg-2: #fff;
+          --card: #fff;
+          --card-solid: #f4f6fa;
+          --line: #d5dbe6;
+          --text: #0f172a;
+          --muted: #5a6b85;
+        }
+        html,
+        body {
+          background: #fff;
+        }
+        .topbar {
+          position: static;
+          background: #fff;
+        }
+        .actions {
+          display: none;
+        }
+        .issues,
+        .table-wrap {
+          max-height: none;
+          overflow: visible;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">∑</span>
+        <div>
+          <h1>NDPd Analytical</h1>
+          <p class="sub">Dashboard de execução de checklist</p>
+        </div>
+      </div>
+      <div class="meta" id="meta"></div>
+      <div class="actions">
+        <button id="btn-refresh" class="primary">Reanalisar</button>
+        <button id="btn-print">Imprimir / PDF</button>
+      </div>
+    </header>
+
+    <div id="empty" class="empty hidden">
+      <h2>Nenhuma análise carregada</h2>
+      <p>
+        Abra a tela do checklist no NDPd, clique no ícone da extensão e use
+        <strong>Coletar tudo</strong> — depois clique em <strong>Dashboard</strong>. Você também
+        pode tentar reanalisar por aqui.
+      </p>
+      <button id="btn-empty-refresh">Reanalisar agora</button>
+    </div>
+
+    <main id="content" class="hidden">
+      <section class="kpis" id="kpis"></section>
+
+      <div class="grid-2">
+        <article class="card">
+          <h2>Status dos itens</h2>
+          <div class="donut-wrap">
+            <div id="donut"></div>
+            <ul class="legend" id="legend"></ul>
+          </div>
+        </article>
+        <article class="card">
+          <h2>Progresso por seção</h2>
+          <div class="bars" id="section-bars"></div>
+        </article>
+      </div>
+
+      <div class="grid-2">
+        <article class="card">
+          <h2>Problemas por tipo</h2>
+          <div class="bars" id="issue-bars"></div>
+        </article>
+        <article class="card">
+          <h2>Resumo de validações</h2>
+          <div class="issue-summary" id="issue-summary"></div>
+        </article>
+      </div>
+
+      <article class="card" style="margin-bottom: 16px">
+        <h2>Evidências fotográficas (<span id="gallery-count">0</span>)</h2>
+        <div class="gallery" id="gallery"></div>
+      </article>
+
+      <article class="card" style="margin-bottom: 16px">
+        <h2>Validações detalhadas (<span id="issues-count">0</span>)</h2>
+        <div class="issues" id="issues"></div>
+      </article>
+
+      <article class="card" style="margin-bottom: 16px">
+        <h2>Casos de teste (<span id="items-count">0</span>)</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Seção</th>
+                <th>Item</th>
+                <th>Obrig.</th>
+                <th>Status</th>
+                <th>Resposta</th>
+                <th>Campos</th>
+                <th>Anexos</th>
+                <th>Problemas</th>
+              </tr>
+            </thead>
+            <tbody id="items-body"></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="card notes-card">
+        <h2>Observações</h2>
+        <ul id="notes"></ul>
+      </article>
+    </main>
+
+    <div class="page-foot" id="foot"></div>
+
+    <script src="dashboard.js"></script>
+  </body>
+</html>

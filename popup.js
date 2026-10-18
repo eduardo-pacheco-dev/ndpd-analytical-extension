@@ -12,6 +12,7 @@ const itemsEl = document.getElementById("items");
 const notesEl = document.getElementById("notes");
 const jsonBtn = document.getElementById("export-json");
 const csvBtn = document.getElementById("export-csv");
+const dashboardBtn = document.getElementById("open-dashboard");
 const refreshBtn = document.getElementById("refresh");
 const activeBtn = document.getElementById("analyze-active");
 const allBtn = document.getElementById("analyze-all");
@@ -163,6 +164,7 @@ async function analyze(mode) {
 
     currentResult = data;
     render(data);
+    await storeResult(data);
     setLoading(false, "Análise atualizada às " + new Date().toLocaleTimeString("pt-BR"));
     console.info(
       "[NDPd Analytical] relatório pronto:",
@@ -187,7 +189,28 @@ function setLoading(isLoading, message) {
   allBtn.disabled = isLoading;
   jsonBtn.disabled = isLoading || !currentResult;
   csvBtn.disabled = isLoading || !currentResult;
+  dashboardBtn.disabled = isLoading || !currentResult;
   if (message) statusEl.textContent = message;
+}
+
+function storageArea() {
+  return chrome.storage && chrome.storage.session ? chrome.storage.session : chrome.storage.local;
+}
+
+function storeResult(data) {
+  return new Promise((resolve) => {
+    try {
+      storageArea().set({ ndpdLastAnalysis: data }, () => resolve());
+    } catch (error) {
+      resolve();
+    }
+  });
+}
+
+async function openDashboard() {
+  if (!currentResult) return;
+  await storeResult(currentResult);
+  chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") });
 }
 
 function renderError(message) {
@@ -522,6 +545,7 @@ chrome.runtime.onMessage.addListener((message) => {
 refreshBtn.addEventListener("click", () => analyze("all"));
 allBtn.addEventListener("click", () => analyze("all"));
 activeBtn.addEventListener("click", () => analyze("active"));
+dashboardBtn.addEventListener("click", openDashboard);
 jsonBtn.addEventListener("click", exportJson);
 csvBtn.addEventListener("click", exportCsv);
 
