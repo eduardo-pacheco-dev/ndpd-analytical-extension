@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "NDPD Analytical — Hello World",
+  "version": "0.1.0",
+  "description": "Painel popup de teste (hello world) da extensão NDPD Analytical.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "NDPD Analytical"
+  }
+}
