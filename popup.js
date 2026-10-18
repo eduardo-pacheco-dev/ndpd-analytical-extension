@@ -302,9 +302,6 @@ function renderKpis(data, counts, total) {
   kpisEl.appendChild(kpiCard("Aceitos", counts.accepted, "ok", acceptance + "% do total"));
   kpisEl.appendChild(kpiCard("Rejeitados", counts.rejected, counts.rejected ? "err" : null, "requer atenção"));
   kpisEl.appendChild(kpiCard("Pendentes", counts.pending, counts.pending ? "warn" : null, "não finalizados"));
-  kpisEl.appendChild(
-    kpiCard("Anexos", summary.attachments, null, summary.attachmentsRejected + " rejeitado(s)")
-  );
 }
 
 function renderDonut(counts, total) {
