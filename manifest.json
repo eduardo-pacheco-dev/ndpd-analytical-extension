@@ -1,10 +1,18 @@
 {
   "manifest_version": 3,
-  "name": "NDPD Analytical — Hello World",
-  "version": "0.1.0",
-  "description": "Painel popup de teste (hello world) da extensão NDPD Analytical.",
+  "name": "NDPD Analytical",
+  "version": "1.0.0",
+  "description": "Analisa checklists do NDPd abertos na aba atual: seções, status, respostas, anexos e pendências.",
+  "permissions": ["activeTab", "scripting"],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "NDPD Analytical"
-  }
+    "default_title": "Analisar checklist do NDPd"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.deliveryplatform.nokia.com/*"],
+      "js": ["analyzer.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ]
 }
