@@ -48,7 +48,7 @@ test("the content-script chain registers a single message listener and analyzer 
   assert.equal(listeners.length, 1);
   assert.ok(window.NdPdAnalyzer);
   assert.ok(window.NdPdScraper);
-  assert.equal(window.__ndpdAnalytical.version, 8);
+  assert.equal(window.__ndpdAnalytical.version, 9);
 });
 
 test("a second injection of content.js does not duplicate the listener", () => {

@@ -18,6 +18,27 @@ function fakeClock() {
   };
 }
 
+// Clock whose `sleep` also runs scheduled tasks (used to emulate Angular rendering
+// the panel content some time AFTER the click).
+function scriptedClock() {
+  let time = 0;
+  const tasks = [];
+  return {
+    now: () => time,
+    sleep: (ms) => {
+      time += ms;
+      for (const task of tasks) {
+        if (!task.done && task.at <= time) {
+          task.done = true;
+          task.run();
+        }
+      }
+      return Promise.resolve();
+    },
+    schedule: (delay, run) => tasks.push({ at: time + delay, run, done: false }),
+  };
+}
+
 // Emulates the real NDPd/Material stepper: EVERY step label carries
 // `.mat-step-label-active`, only the selected one adds `.mat-step-label-selected` +
 // aria-selected="true"; inactive panels stay in the DOM as
@@ -123,4 +144,65 @@ test("analyzeDocument reports the active step of the stepper as a checklist", ()
   assert.equal(result.kind, "checklist");
   assert.equal(result.summary.items, 1);
   assert.equal(result.items[0].name, "Item Alpha");
+});
+
+test("collectAll waits for content that Angular renders after the click", async () => {
+  const names = ["Alpha", "Beta", "Gamma"];
+  const html =
+    `<!doctype html><html><body><mat-horizontal-stepper role="tablist" class="mat-stepper-horizontal">` +
+    names
+      .map(
+        (_, index) =>
+          `<mat-step-header role="tab" id="h${index}" aria-selected="${index === 0}" class="mat-step-header mat-horizontal-stepper-header">` +
+          `<div class="mat-step-text-label">Etapa ${index + 1}</div>` +
+          `<div class="mat-step-label mat-step-label-active${index === 0 ? " mat-step-label-selected" : ""}"></div>` +
+          `</mat-step-header>`
+      )
+      .join("") +
+    names
+      .map(
+        (_, index) =>
+          `<div role="tabpanel" id="p${index}" class="mat-horizontal-stepper-content${index === 0 ? "" : " mat-horizontal-stepper-content-inactive"}"` +
+          ` style="visibility: ${index === 0 ? "inherit" : "hidden"};">` +
+          `<div class="content-body" data-step="${index}"></div>` +
+          `</div>`
+      )
+      .join("") +
+    `</mat-horizontal-stepper></body></html>`;
+
+  const { window, document, location } = require("../helpers/dom.js").makeDom(html);
+  const clock = scriptedClock();
+
+  const render = (index) => {
+    const body = document.querySelector(`#p${index} .content-body`);
+    body.innerHTML =
+      `<div class="content-item"><div><h4 class="testcase-name-overflow">Item ${names[index]}</h4>` +
+      `<span class="accepted-state">Aceito</span></div>` +
+      `<input class="mat-input-element" placeholder="Valor" value="${names[index]}" /></div>`;
+  };
+
+  const headers = names.map((_, index) => document.getElementById("h" + index));
+  const panels = names.map((_, index) => document.getElementById("p" + index));
+
+  // First step is already rendered; the others are rendered asynchronously after the click.
+  render(0);
+  headers.forEach((headerEl, index) => {
+    headerEl.addEventListener("click", () => {
+      headers.forEach((node, position) => {
+        node.setAttribute("aria-selected", String(position === index));
+        node.querySelector(".mat-step-label").classList.toggle("mat-step-label-selected", position === index);
+      });
+      panels.forEach((node, position) => {
+        node.classList.toggle("mat-horizontal-stepper-content-inactive", position !== index);
+        node.style.visibility = position === index ? "inherit" : "hidden";
+      });
+      if (index > 0) clock.schedule(700, () => render(index));
+    });
+  });
+
+  const collector = createCollector({ analyzer, window, document, location, clock });
+  const report = await collector.collectAll(() => {});
+
+  assert.deepEqual(report.items.map((item) => item.name).sort(), ["Item Alpha", "Item Beta", "Item Gamma"]);
+  assert.equal(report.summary.items, 3);
 });

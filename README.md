@@ -63,6 +63,18 @@ e, se possível, colete o HTML do passo atual:
 copy(document.querySelector('.mat-horizontal-stepper-content, .mat-step-content, mat-tab-group')?.outerHTML)
 ```
 
+## Tempos de espera (coleta)
+
+Como o Angular troca o step/aba na hora mas renderiza o conteúdo depois, a coleta espera:
+
+1. o item virar ativo (até **3 s**);
+2. o conteúdo anterior sumir e o novo aparecer (até **5 s**);
+3. o novo conteúdo ficar **estável e não-vazio** (até **12 s**, desistindo após **4 s** se
+   o passo realmente não tiver conteúdo);
+4. um **delay de 600 ms** após ativar cada item, antes de ler.
+
+Os tempos ficam em `content.js` (`TIMING`) e podem ser ajustados sem mexer no coletor.
+
 ## O que a análise entrega
 
 Dependendo da tela, a extensão escolhe o modo **checklist** ou **formulário (steps/abas)**.

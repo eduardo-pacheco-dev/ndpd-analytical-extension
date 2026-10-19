@@ -2,9 +2,19 @@
 (function () {
   "use strict";
 
-  const VERSION = 8;
+  const VERSION = 9;
   const MAX_DEPTH = 4;
   const PREFIX = "[NDPd Analytical]";
+
+  // Espera pela página: o Angular troca o step na hora, mas renderiza o conteúdo depois.
+  const TIMING = {
+    settleDelayMs: 600,
+    clickTimeoutMs: 3000,
+    changeTimeoutMs: 5000,
+    settleTimeoutMs: 12000,
+    readyTimeoutMs: 4000,
+    pollIntervalMs: 150,
+  };
 
   function log(...args) {
     console.info(PREFIX, ...args);
@@ -46,6 +56,7 @@
         timers,
         log,
         warn,
+        ...TIMING,
       })
     : null;
 

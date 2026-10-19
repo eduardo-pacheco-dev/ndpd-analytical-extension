@@ -36,6 +36,17 @@
     const log = opts.log || function () {};
     const warn = opts.warn || function () {};
 
+    // Timing (all in ms). The NDPd/Angular screens flip `aria-selected` immediately but
+    // render the step/section content asynchronously, so give the page time to load.
+    const timing = {
+      clickTimeout: opts.clickTimeoutMs == null ? 2500 : opts.clickTimeoutMs,
+      changeTimeout: opts.changeTimeoutMs == null ? 4000 : opts.changeTimeoutMs,
+      settleTimeout: opts.settleTimeoutMs == null ? 10000 : opts.settleTimeoutMs,
+      settleDelay: opts.settleDelayMs == null ? 500 : opts.settleDelayMs,
+      readyTimeout: opts.readyTimeoutMs == null ? 3000 : opts.readyTimeoutMs,
+      pollInterval: opts.pollIntervalMs == null ? 120 : opts.pollIntervalMs,
+    };
+
     function activeIndex(root, kind) {
       return analyzer.navNodes(root, kind).findIndex((node) => analyzer.nodeActive(kind, node));
     }
@@ -43,10 +54,20 @@
     function contentSignature(root) {
       const scope = analyzer.activeContentScope(root);
       const controlCount = scope.querySelectorAll(
-        "input, textarea, mat-select, mat-radio-group, app-check-box, mat-checkbox, .content-item"
+        "input, textarea, mat-select, mat-radio-group, app-check-box, mat-checkbox, mat-slide-toggle, .content-item"
       ).length;
       const snippet = analyzer.clean(scope.textContent).slice(0, 120);
       return controlCount + "|" + snippet;
+    }
+
+    // "Ready" means the active scope already shows some controls/items or text. Used to
+    // avoid scraping a step that is still empty while Angular renders it.
+    function contentReady(root) {
+      const scope = analyzer.activeContentScope(root);
+      const controlCount = scope.querySelectorAll(
+        "input, textarea, mat-select, mat-radio-group, app-check-box, mat-checkbox, mat-slide-toggle, .content-item"
+      ).length;
+      return controlCount > 0 || analyzer.clean(scope.textContent).length > 0;
     }
 
     async function waitFor(condition, timeout, interval) {
@@ -88,22 +109,32 @@
     }
 
     async function settleContent(root, before) {
+      // 1) Wait until the previously active content actually goes away/replaces.
       if (contentSignature(root) === before) {
-        await waitFor(() => contentSignature(root) !== before, 2500, 100);
+        await waitFor(() => contentSignature(root) !== before, timing.changeTimeout, timing.pollInterval);
       }
+      // 2) Wait until the new content exists and stops changing (Angular renders async).
+      // If the scope never reports content, give up after `readyTimeout` so genuinely
+      // empty steps do not block the whole collection.
       let previous = null;
       let stable = 0;
+      let readyDeadline = 0;
       const start = clock.now();
-      while (clock.now() - start < 5000) {
+      while (clock.now() - start < timing.settleTimeout) {
         const signature = contentSignature(root);
-        if (signature && signature === previous) {
+        const ready = contentReady(root);
+        if (!ready && readyDeadline === 0) readyDeadline = clock.now() + timing.readyTimeout;
+
+        if (ready && signature === previous) {
           stable += 1;
-          if (stable >= 2) break;
+          if (stable >= 2) return;
         } else {
           stable = 0;
         }
         previous = signature;
-        await clock.sleep(120);
+
+        if (!ready && readyDeadline !== 0 && clock.now() > readyDeadline) return;
+        await clock.sleep(timing.pollInterval);
       }
     }
 
@@ -118,7 +149,7 @@
         for (const target of clickTargets(node)) {
           fireClick(target);
 
-          if (await waitFor(() => activeIndex(root, kind) === index, 1400, 80)) {
+          if (await waitFor(() => activeIndex(root, kind) === index, timing.clickTimeout, timing.pollInterval)) {
             await settleContent(root, before);
             return { ok: true, reason: "active" };
           }
@@ -134,7 +165,7 @@
           for (const type of ["keydown", "keypress", "keyup"]) {
             node.dispatchEvent(new win.KeyboardEvent(type, { key: "Enter", code: "Enter", bubbles: true }));
           }
-          if (await waitFor(() => activeIndex(root, kind) === index, 1200, 80)) {
+          if (await waitFor(() => activeIndex(root, kind) === index, timing.clickTimeout, timing.pollInterval)) {
             await settleContent(root, before);
             return { ok: true, reason: "keyboard" };
           }
@@ -142,7 +173,7 @@
           /* KeyboardEvent may be unavailable */
         }
 
-        await clock.sleep(220);
+        await clock.sleep(timing.pollInterval);
       }
 
       return { ok: false, reason: "could-not-activate" };
@@ -235,6 +266,13 @@
             index === assumed && initialActive < 0
               ? { ok: true, reason: "assumed-active" }
               : await activate(root, nav.kind, index);
+
+          // Give Angular a moment to render the item content before reading it, then wait
+          // for it to actually settle (this is the "delay" that fixes partial reads).
+          if (activation.ok) {
+            await clock.sleep(timing.settleDelay);
+            await settleContent(root, null);
+          }
 
           const chosen = activation.ok ? chooseScope(root, nodes, used) : { scope: null, child: null };
           const scope = chosen.scope;
