@@ -1,9 +1,9 @@
-// Content script bridge: receives popup requests and returns the checklist analysis.
-// "NDPD_ANALYZE_ALL" walks every section of the sidebar, rendering and scraping each one.
+// Content script bridge: receives popup requests and returns the analysis.
+// "NDPD_ANALYZE_ALL" walks every section/step/tab, renders and scrapes each one.
 (function () {
   "use strict";
 
-  const VERSION = 3;
+  const VERSION = 4;
   const PREFIX = "[NDPd Analytical]";
 
   function log(...args) {
@@ -14,8 +14,6 @@
     console.warn(PREFIX, ...args);
   }
 
-  // Versioned guard: a page loaded with an older build may already have a (now stale)
-  // content script attached, so we must not skip registering the current listener.
   const registered = window.__ndpdAnalytical;
   if (registered && registered.version === VERSION && registered.listener) {
     log("content script v" + VERSION + " já registrado; ignorando duplicata.");
@@ -34,22 +32,49 @@
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  function sectionNodes(doc) {
-    return Array.from(doc.querySelectorAll("app-checklist-side-sections .sidebar-item"));
+  function navNodes(doc, kind) {
+    if (kind === "checklist") {
+      return Array.from(doc.querySelectorAll("app-checklist-side-sections .sidebar-item"));
+    }
+    if (kind === "steps") {
+      return Array.from(doc.querySelectorAll("mat-step-header, .mat-step-header"));
+    }
+    if (kind === "tabs") {
+      return Array.from(doc.querySelectorAll("mat-tab-group .mat-tab-label"));
+    }
+    return [];
   }
 
-  function activeIndex(doc) {
-    return sectionNodes(doc).findIndex((node) => node.classList.contains("active"));
+  function nodeActive(kind, node) {
+    if (!node) return false;
+    if (kind === "checklist") return node.classList.contains("active");
+    if (kind === "steps") {
+      return (
+        node.classList.contains("mat-step-header-selected") ||
+        node.getAttribute("aria-selected") === "true"
+      );
+    }
+    if (kind === "tabs") {
+      return (
+        node.classList.contains("mat-tab-label-active") ||
+        node.getAttribute("aria-selected") === "true"
+      );
+    }
+    return false;
+  }
+
+  function activeIndex(doc, kind) {
+    return navNodes(doc, kind).findIndex((node) => nodeActive(kind, node));
   }
 
   function contentSignature(doc) {
-    const body = doc.querySelector(".checklist .content-body");
-    if (!body) return "";
-    const first = body.querySelector(".content-item h4");
-    return [
-      body.querySelectorAll(".content-item").length,
-      window.NdPdAnalyzer.clean(first ? first.textContent : "").slice(0, 80),
-    ].join("|");
+    const analyzer = window.NdPdAnalyzer;
+    const scope = analyzer.activeContentScope(doc);
+    const controlCount = scope.querySelectorAll(
+      "input, textarea, mat-select, mat-radio-group, app-check-box, mat-checkbox, .content-item"
+    ).length;
+    const text = analyzer.clean(scope.textContent).slice(0, 120);
+    return controlCount + "|" + text;
   }
 
   async function waitFor(condition, timeout, interval) {
@@ -66,24 +91,23 @@
     node.dispatchEvent(event);
   }
 
-  async function activateSection(doc, index) {
-    const nodes = sectionNodes(doc);
-    const node = nodes[index];
+  async function activate(doc, kind, index) {
+    const node = navNodes(doc, kind)[index];
     if (!node) return false;
-    if (activeIndex(doc) === index) return true;
+    if (activeIndex(doc, kind) === index) return true;
 
     const before = contentSignature(doc);
     clickElement(node);
-    let activated = await waitFor(() => activeIndex(doc) === index, 2500, 100);
+    let activated = await waitFor(() => activeIndex(doc, kind) === index, 2500, 100);
 
     if (!activated) {
-      const label = node.querySelector(".label") || node.querySelector(".bold-label");
-      if (label) clickElement(label);
-      activated = await waitFor(() => activeIndex(doc) === index, 2500, 100);
+      const label =
+        node.querySelector(".mat-step-text-label, .mat-step-label, .label, .bold-label, span") || node;
+      clickElement(label);
+      activated = await waitFor(() => activeIndex(doc, kind) === index, 2500, 100);
     }
     if (!activated) return false;
 
-    // Wait for the new content: either it changed, or it is already stable.
     if (contentSignature(doc) === before) {
       await waitFor(() => contentSignature(doc) !== before, 2000, 100);
     }
@@ -103,51 +127,56 @@
       await sleep(120);
     }
 
-    return activeIndex(doc) === index;
+    return activeIndex(doc, kind) === index;
   }
 
-  async function collectAllSections(onProgress) {
-    const doc = document;
+  async function collectAll(onProgress) {
     const analyzer = window.NdPdAnalyzer;
-    const originalIndex = activeIndex(doc);
-    const sections = analyzer.readSections(doc);
+    const plan = analyzer.planNavigator(document);
+    const originalIndex = activeIndex(document, plan.kind);
     const collected = [];
 
-    log("iniciando coleta:", sections.length, "seção(ões); ativa =", originalIndex);
+    log("iniciando coleta:", plan.kind, "| itens de navegação =", plan.items.length);
 
-    for (let index = 0; index < sections.length; index += 1) {
-      const current = analyzer.readSections(doc)[index] || sections[index];
-      if (onProgress) {
-        onProgress({ current: index + 1, total: sections.length, label: current.label });
+    if (plan.items.length === 0) {
+      const captured = analyzer.captureCurrent(document, plan.kind, null);
+      collected.push({ index: 0, ref: null, rendered: true, ...captured });
+    } else {
+      for (let index = 0; index < plan.items.length; index += 1) {
+        const current = analyzer.planNavigator(document).items[index] || plan.items[index];
+        if (onProgress) {
+          onProgress({ current: index + 1, total: plan.items.length, label: current.label });
+        }
+
+        const rendered = await activate(document, plan.kind, index);
+        const fresh = analyzer.planNavigator(document).items[index] || current;
+        const captured = rendered
+          ? analyzer.captureCurrent(document, plan.kind, fresh)
+          : { items: [], fields: [], attachments: [] };
+        log(
+          `item ${index + 1}/${plan.items.length} "${current.label}" renderizado=${rendered} campos=${captured.fields.length} itens=${captured.items.length}`
+        );
+        collected.push({ index, ref: fresh, rendered, ...captured });
       }
 
-      const rendered = await activateSection(doc, index);
-      const fresh = analyzer.readSections(doc)[index] || current;
-      const items = rendered ? analyzer.readItems(doc, fresh) : [];
-      log(`seção ${index + 1}/${sections.length} "${current.label}" renderizada=${rendered} itens=${items.length}`);
-      collected.push({ sectionIndex: index, section: fresh, items, rendered });
+      if (originalIndex >= 0 && activeIndex(document, plan.kind) !== originalIndex) {
+        await activate(document, plan.kind, originalIndex);
+        log("posição original restaurada:", originalIndex);
+      }
     }
 
-    if (originalIndex >= 0 && activeIndex(doc) !== originalIndex) {
-      await activateSection(doc, originalIndex);
-      log("seção original restaurada:", originalIndex);
-    }
+    if (onProgress) onProgress({ current: plan.items.length, total: plan.items.length, done: true });
 
-    if (onProgress) onProgress({ current: sections.length, total: sections.length, done: true });
-
-    const report = analyzer.buildReport(doc, location, collected, "all");
-    log(
-      "coleta concluída: itens =",
-      report.summary.items,
-      "| problemas =",
-      report.summary.issues
-    );
+    const report = analyzer.buildReport(document, location, collected, "all", plan.kind);
+    log("coleta concluída:", JSON.stringify(report.summary));
     return report;
   }
 
-  function analyzeActiveSection() {
+  function analyzeActive() {
     return window.NdPdAnalyzer.analyzeDocument(document, window.location);
   }
+
+  window.NdPdScraper = { collectAll, activate, activeIndex, contentSignature, navNodes };
 
   function handleMessage(message, _sender, sendResponse) {
     if (!message) return undefined;
@@ -159,7 +188,7 @@
         return undefined;
       }
 
-      collectAllSections((progress) => {
+      collectAll((progress) => {
         try {
           chrome.runtime.sendMessage({ type: "NDPD_PROGRESS", progress });
         } catch (error) {
@@ -171,13 +200,13 @@
           warn("falha na coleta:", error && error.message);
           sendResponse({ ok: false, error: error && error.message ? error.message : String(error) });
         });
-      return true; // keep the channel open for the async response
+      return true;
     }
 
     if (message.type === "NDPD_ANALYZE") {
       log("recebido NDPD_ANALYZE");
       try {
-        sendResponse({ ok: true, data: analyzeActiveSection() });
+        sendResponse({ ok: true, data: analyzeActive() });
       } catch (error) {
         sendResponse({ ok: false, error: error && error.message ? error.message : String(error) });
       }
@@ -190,16 +219,16 @@
   chrome.runtime.onMessage.addListener(handleMessage);
   window.__ndpdAnalytical = { version: VERSION, listener: handleMessage };
 
-  // Diagnostics helper (also used by tests): window.__ndpdDiagnostics() in the page console.
   window.__ndpdDiagnostics = function () {
     const analyzer = window.NdPdAnalyzer;
+    const plan = analyzer ? analyzer.planNavigator(document) : { kind: "unknown", items: [] };
     const info = {
       version: VERSION,
       url: location.href,
-      recognized: Boolean(document.querySelector("app-checklist-execution-special")),
-      sections: analyzer ? analyzer.readSections(document).map((s) => s.label) : [],
-      activeIndex: activeIndex(document),
-      renderedItems: document.querySelectorAll(".checklist .content-body .content-item").length,
+      kind: plan.kind,
+      navigatorItems: plan.items.map((item) => item.label),
+      fields: analyzer ? analyzer.readFields(analyzer.activeContentScope(document)).length : 0,
+      checklistItems: document.querySelectorAll(".checklist .content-body .content-item").length,
     };
     console.info(PREFIX, "diagnóstico", info);
     return info;

@@ -44,6 +44,10 @@ Ideal para print: aumente o zoom do popup se quiser letras maiores, ou use
 
 ## O que a análise entrega
 
+Dependendo da tela, a extensão escolhe o modo **checklist** ou **formulário (steps/abas)**.
+
+**Modo checklist:**
+
 - **Resumo (inventário):** seções, itens, aceitos, rejeitados, pendentes e anexos.
 - **Validações:**
   - item obrigatório sem aceite/rejeição;
@@ -57,7 +61,28 @@ Ideal para print: aumente o zoom do popup se quiser letras maiores, ou use
   preenchidos, anexos (com miniatura) e problemas.
 - **Exportação:** JSON completo e CSV (separador `;`, com BOM para Excel pt-BR).
 
-## Coleta de todas as seções
+## Formulários com steps ou abas
+
+Se a tela de execução não for uma checklist e sim um **formulário com passos**
+(`mat-stepper`) ou **abas** (`mat-tab-group`), a extensão troca de modo automaticamente:
+
+- percorre cada passo/aba, renderiza e lê os campos:
+  - texto e texto longo (`input`/`textarea`), data, `mat-select`, `mat-radio-group`,
+    `mat-checkbox` e `mat-slide-toggle`;
+  - rótulo vindo de `mat-label`, `.input-label`, `label`, `placeholder` ou do título acima;
+  - obrigatoriedade detectada por `[required]`, `aria-required` ou marcação `*Required`.
+- KPIs: **Passos**, **Campos**, **Preenchidos** e **Vazios**;
+- donut de **preenchimento** e barras de **progresso por passo**
+  (preenchidos / obrigatórios vazios / opcionais vazios);
+- validações: campo obrigatório vazio, seleção não preenchida, anexos rejeitados/sem nome,
+  passo que não carregou e passo sem campos identificados;
+- export CSV no modo formulário usa as colunas
+  `Passo; Campo; Tipo; Obrigatorio; Preenchido; Valor; Problemas`.
+
+O mesmo botão **Coletar tudo** funciona nos dois modos; **Seção atual** lê apenas o passo/seção
+aberto. `window.__ndpdDiagnostics()` mostra qual modo foi detectado (`kind`).
+
+## Coleta de todas as seções (checklist)
 
 O Angular renderiza **somente a seção ativa** no DOM. Para coletar tudo, o content script:
 

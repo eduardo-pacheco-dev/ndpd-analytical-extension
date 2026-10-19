@@ -25,6 +25,10 @@ const ISSUE_LABELS = {
   "required-unanswered": "Obrigatório sem aceite",
   "radio-unanswered": "Pergunta sem resposta",
   "input-required-empty": "Campo obrigatório vazio",
+  "required-field-empty": "Campo obrigatório vazio",
+  "select-empty": "Seleção não preenchida",
+  "no-fields": "Sem campos identificados",
+  "step-not-loaded": "Passo não carregado",
   "attachment-missing": "Evidência sem anexo",
   "attachment-rejected": "Anexo rejeitado",
   "attachment-unnamed": "Anexo sem nome",
@@ -53,6 +57,9 @@ const issuesEl = document.getElementById("issues");
 const issuesCountEl = document.getElementById("issues-count");
 const itemsEl = document.getElementById("items");
 const itemsCountEl = document.getElementById("items-count");
+const itemsTitleEl = document.getElementById("items-title");
+const barsTitleEl = document.getElementById("bars-title");
+const donutTitleEl = document.getElementById("donut-title");
 const notesEl = document.getElementById("notes");
 const jsonBtn = document.getElementById("export-json");
 const csvBtn = document.getElementById("export-csv");
@@ -213,13 +220,7 @@ async function analyze(mode) {
     currentResult = data;
     render(data);
     setLoading(false, "Análise atualizada às " + new Date().toLocaleTimeString("pt-BR"));
-    console.info(
-      "[NDPd Analytical] relatório pronto:",
-      data.summary.items,
-      "itens,",
-      data.summary.sectionsCollected + "/" + data.summary.sections,
-      "seções coletadas"
-    );
+    console.info("[NDPd Analytical] relatório pronto:", JSON.stringify(data.summary));
   } catch (error) {
     currentResult = null;
     renderError(error.message || String(error));
@@ -250,7 +251,22 @@ function renderError(message) {
 function render(data) {
   errorEl.classList.add("hidden");
   resultEl.classList.remove("hidden");
+  renderWorkOrder(data);
 
+  const isForm = data.kind !== "checklist";
+  donutTitleEl.textContent = isForm ? "Preenchimento" : "Status dos itens";
+  barsTitleEl.textContent = isForm ? "Progresso por passo" : "Progresso por seção";
+  itemsTitleEl.textContent = isForm ? "Passos e campos" : "Casos de teste";
+
+  if (isForm) renderForm(data);
+  else renderChecklist(data);
+
+  renderIssueBars(data.issues);
+  renderIssues(data.issues);
+  renderNotes(data.notes);
+}
+
+function renderChecklist(data) {
   const statusCounts = { accepted: 0, rejected: 0, pending: 0, performed: 0, other: 0 };
   for (const item of data.items) {
     if (statusCounts[item.status] === undefined || item.status === "unknown") statusCounts.other += 1;
@@ -258,14 +274,65 @@ function render(data) {
   }
   const total = data.items.length;
 
-  renderWorkOrder(data);
-  renderKpis(data, statusCounts, total);
-  renderDonut(statusCounts, total);
+  renderKpis(
+    kpisEl,
+    [
+      ["Itens", summaryOf(data).items, null, summaryOf(data).required + " obrigatórios"],
+      ["Aceitos", statusCounts.accepted, "ok", (total ? Math.round((statusCounts.accepted / total) * 100) : 0) + "% do total"],
+      ["Rejeitados", statusCounts.rejected, statusCounts.rejected ? "err" : null, "requer atenção"],
+      ["Pendentes", statusCounts.pending, statusCounts.pending ? "warn" : null, "não finalizados"],
+    ]
+  );
+
+  renderDonut(
+    [
+      { key: "accepted", label: "Aceitos", value: statusCounts.accepted, color: STATUS_COLORS.accepted },
+      { key: "pending", label: "Pendentes", value: statusCounts.pending, color: STATUS_COLORS.pending },
+      { key: "rejected", label: "Rejeitados", value: statusCounts.rejected, color: STATUS_COLORS.rejected },
+      { key: "performed", label: "Executados", value: statusCounts.performed, color: STATUS_COLORS.performed },
+      { key: "other", label: "Sem status", value: statusCounts.other, color: STATUS_COLORS.other },
+    ],
+    total,
+    "aceites"
+  );
+
   renderSectionBars(data);
-  renderIssueBars(data.issues);
-  renderIssues(data.issues);
   renderItems(data.items);
-  renderNotes(data.notes);
+}
+
+function renderForm(data) {
+  const summary = data.summary || {};
+  const fields = data.fields || [];
+  const filled = summary.filled || 0;
+  const requiredEmpty = summary.requiredEmpty || 0;
+  const emptyOptional = Math.max(0, fields.length - filled - requiredEmpty);
+
+  renderKpis(
+    kpisEl,
+    [
+      ["Passos", summary.steps || 0, null, (summary.stepsCollected || 0) + " coletados"],
+      ["Campos", fields.length, null, summary.required + " obrigatórios"],
+      ["Preenchidos", filled, "ok", (fields.length ? Math.round((filled / fields.length) * 100) : 0) + "% do total"],
+      ["Vazios", fields.length - filled, requiredEmpty ? "err" : fields.length - filled ? "warn" : null, requiredEmpty + " obrigatório(s)"],
+    ]
+  );
+
+  renderDonut(
+    [
+      { key: "filled", label: "Preenchidos", value: filled, color: STATUS_COLORS.accepted },
+      { key: "requiredEmpty", label: "Vazios obrigatórios", value: requiredEmpty, color: STATUS_COLORS.rejected },
+      { key: "emptyOptional", label: "Vazios opcionais", value: emptyOptional, color: STATUS_COLORS.pending },
+    ],
+    fields.length,
+    "preenchidos"
+  );
+
+  renderStepBars(data);
+  renderSteps(data.steps || [], fields);
+}
+
+function summaryOf(data) {
+  return data.summary || {};
 }
 
 function renderWorkOrder(data) {
@@ -275,15 +342,29 @@ function renderWorkOrder(data) {
   if (order.number) titleParts.push(order.number);
   if (order.name) titleParts.push(order.name);
   workorderEl.appendChild(
-    el("div", "wo-title", titleParts.length ? titleParts.join(" · ") : order.header || "Checklist sem identificação")
+    el(
+      "div",
+      "wo-title",
+      titleParts.length ? titleParts.join(" · ") : order.header || "Execução sem identificação"
+    )
   );
+
+  const isForm = data.kind !== "checklist";
+  const collected = isForm
+    ? (data.summary.stepsCollected || 0) + "/" + (data.summary.steps || 0) + " passos"
+    : (data.summary.sectionsCollected || 0) + "/" + (data.summary.sections || 0) + " seções";
 
   const meta = [];
   if (order.header && order.header !== titleParts.join(" · ")) meta.push(order.header);
   if (order.smpId) meta.push(order.smpId);
-  meta.push(data.summary.sectionsCollected + "/" + data.summary.sections + " seções");
-  meta.push(data.mode === "all" ? "coleta completa" : "seção ativa");
+  meta.push(collected);
+  meta.push(isForm ? (data.kind === "form-tabs" ? "formulário (abas)" : "formulário (passos)") : "checklist");
   workorderEl.appendChild(el("div", "wo-meta", meta.join("  •  ")));
+}
+
+function renderKpis(target, cards) {
+  target.textContent = "";
+  for (const [label, value, tone, hint] of cards) target.appendChild(kpiCard(label, value, tone, hint));
 }
 
 function kpiCard(label, value, tone, hint) {
@@ -294,17 +375,7 @@ function kpiCard(label, value, tone, hint) {
   return card;
 }
 
-function renderKpis(data, counts, total) {
-  const summary = data.summary;
-  const acceptance = total > 0 ? Math.round((counts.accepted / total) * 100) : 0;
-  kpisEl.textContent = "";
-  kpisEl.appendChild(kpiCard("Itens", summary.items, null, summary.required + " obrigatórios"));
-  kpisEl.appendChild(kpiCard("Aceitos", counts.accepted, "ok", acceptance + "% do total"));
-  kpisEl.appendChild(kpiCard("Rejeitados", counts.rejected, counts.rejected ? "err" : null, "requer atenção"));
-  kpisEl.appendChild(kpiCard("Pendentes", counts.pending, counts.pending ? "warn" : null, "não finalizados"));
-}
-
-function renderDonut(counts, total) {
+function renderDonut(segmentsInput, total, centerLabel) {
   donutEl.textContent = "";
   legendEl.textContent = "";
 
@@ -326,10 +397,7 @@ function renderDonut(counts, total) {
     })
   );
 
-  const segments = ["accepted", "rejected", "pending", "performed", "other"]
-    .map((key) => ({ key, value: counts[key], color: STATUS_COLORS[key] }))
-    .filter((segment) => segment.value > 0);
-
+  const segments = segmentsInput.filter((segment) => segment.value > 0);
   let offset = 0;
   for (const segment of segments) {
     const length = total > 0 ? (circumference * segment.value) / total : 0;
@@ -349,7 +417,7 @@ function renderDonut(counts, total) {
     offset += length;
   }
 
-  const acceptance = total > 0 ? Math.round((counts.accepted / total) * 100) : 0;
+  const mainValue = total > 0 ? Math.round(((segmentsInput[0] ? segmentsInput[0].value : 0) / total) * 100) : 0;
   const big = svgNode("text", {
     x: center,
     y: center + 2,
@@ -358,7 +426,7 @@ function renderDonut(counts, total) {
     "font-weight": 750,
     fill: "#e6edf7",
   });
-  big.textContent = acceptance + "%";
+  big.textContent = mainValue + "%";
   svg.appendChild(big);
 
   const small = svgNode("text", {
@@ -368,27 +436,23 @@ function renderDonut(counts, total) {
     "font-size": 8.5,
     fill: "#8ea3c0",
   });
-  small.textContent = "aceites";
+  small.textContent = centerLabel;
   svg.appendChild(small);
 
   donutEl.appendChild(svg);
 
-  for (const key of ["accepted", "rejected", "pending", "performed", "other"]) {
-    if (!counts[key] && key !== "accepted") continue;
+  segmentsInput.forEach((segment, index) => {
+    if (!segment.value && index !== 0) return;
     const item = el("li");
     const dot = el("span", "dot");
-    dot.style.background = STATUS_COLORS[key];
+    dot.style.background = segment.color;
     item.appendChild(dot);
-    item.appendChild(el("span", null, STATUS_LABELS[key]));
+    item.appendChild(el("span", null, segment.label));
     item.appendChild(
-      el(
-        "span",
-        "val",
-        counts[key] + " • " + (total ? Math.round((counts[key] / total) * 100) : 0) + "%"
-      )
+      el("span", "val", segment.value + " • " + (total ? Math.round((segment.value / total) * 100) : 0) + "%")
     );
     legendEl.appendChild(item);
-  }
+  });
 }
 
 function barRow(label, valueText, segments) {
@@ -442,6 +506,87 @@ function renderSectionBars(data) {
         ]
       )
     );
+  }
+}
+
+function renderStepBars(data) {
+  sectionBarsEl.textContent = "";
+  const steps = data.steps || [];
+  if (steps.length === 0) {
+    sectionBarsEl.appendChild(el("div", "empty", "Nenhum passo encontrado."));
+    return;
+  }
+
+  for (const step of steps) {
+    const counts = step.counts || { total: 0, filled: 0, requiredEmpty: 0 };
+    const total = counts.total || 0;
+    const filled = counts.filled || 0;
+    const requiredEmpty = counts.requiredEmpty || 0;
+    const optionalEmpty = Math.max(0, total - filled - requiredEmpty);
+    const percent = (value) => (total > 0 ? (value / total) * 100 : 0);
+
+    sectionBarsEl.appendChild(
+      barRow(
+        step.label || step.name || "Passo",
+        total > 0 ? filled + "/" + total + " preenchidos" : "não coletado",
+        [
+          { value: filled, percent: percent(filled), color: STATUS_COLORS.accepted, title: "preenchidos" },
+          { value: requiredEmpty, percent: percent(requiredEmpty), color: STATUS_COLORS.rejected, title: "obrigatórios vazios" },
+          { value: optionalEmpty, percent: percent(optionalEmpty), color: STATUS_COLORS.pending, title: "opcionais vazios" },
+        ]
+      )
+    );
+  }
+}
+
+function renderSteps(steps, fields) {
+  itemsEl.textContent = "";
+  itemsCountEl.textContent = String(fields.length);
+
+  if (!steps.length) {
+    itemsEl.appendChild(el("div", "empty", "Nenhum passo coletado."));
+    return;
+  }
+
+  for (const step of steps) {
+    const stepFields = fields.filter((field) => field.stepIndex === step.index + 1);
+    const counts = step.counts || {};
+    const requiredEmpty = counts.requiredEmpty || 0;
+    const complete = (counts.total || 0) > 0 && (counts.filled || 0) === counts.total;
+
+    const card = el("details", "item");
+    if (steps.length === 1 || requiredEmpty > 0) card.open = true;
+
+    const summary = el("summary");
+    summary.appendChild(el("span", "dot " + (requiredEmpty ? "rejected" : complete ? "accepted" : "performed")));
+
+    const main = el("div", "item-main");
+    main.appendChild(el("span", "item-name", step.label || step.name || "Passo"));
+
+    const sub = el("div", "item-sub");
+    sub.appendChild(el("span", "pill", (counts.filled || 0) + "/" + (counts.total || 0) + " preenchidos"));
+    if (counts.required) sub.appendChild(el("span", "pill req", counts.required + " obrigatório(s)"));
+    if (requiredEmpty) sub.appendChild(el("span", "pill", requiredEmpty + " vazio(s)"));
+    main.appendChild(sub);
+
+    summary.appendChild(main);
+    card.appendChild(summary);
+
+    const body = el("div", "item-body");
+    if (stepFields.length === 0) {
+      body.appendChild(el("div", "kv", "Nenhum campo identificado neste passo."));
+    }
+    for (const field of stepFields) {
+      const row = el("div", "kv");
+      row.title = field.typeLabel || "";
+      row.appendChild(el("span", "k", field.label + (field.required ? " *" : "")));
+      const value = el("span", "v", field.value || "—");
+      if (!field.filled) value.style.color = field.required ? "#fca5a5" : "#fde68a";
+      row.appendChild(value);
+      body.appendChild(row);
+    }
+    card.appendChild(body);
+    itemsEl.appendChild(card);
   }
 }
 
@@ -673,6 +818,28 @@ function csvCell(value) {
 
 function exportCsv() {
   if (!currentResult) return;
+
+  if (currentResult.kind !== "checklist") {
+    const rows = [["Passo", "Campo", "Tipo", "Obrigatorio", "Preenchido", "Valor", "Problemas"]];
+    for (const field of currentResult.fields || []) {
+      const issues = (currentResult.issues || [])
+        .filter((issue) => issue.itemName === field.stepLabel && issue.message.includes(field.label))
+        .map((issue) => issue.message);
+      rows.push([
+        field.stepLabel,
+        field.label,
+        field.typeLabel || field.type,
+        field.required ? "Sim" : "Nao",
+        field.filled ? "Sim" : "Nao",
+        field.value || "",
+        issues.join(" | "),
+      ]);
+    }
+    const csvForm = "\uFEFF" + rows.map((row) => row.map(csvCell).join(";")).join("\r\n");
+    download(fileStem(currentResult) + ".csv", csvForm, "text/csv;charset=utf-8");
+    return;
+  }
+
   const rows = [
     ["Secao", "Item", "Obrigatoriedade", "Status", "Resposta", "Anexos", "Anexos rejeitados", "Anexos sem nome", "Campos", "Problemas"],
   ];
