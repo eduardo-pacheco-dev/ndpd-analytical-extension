@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "NDPD Analytical",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Analisa checklists e formulários com steps do NDPd abertos na aba atual: seções, status, campos, anexos e pendências.",
   "permissions": ["activeTab", "scripting"],
   "host_permissions": ["https://*.deliveryplatform.nokia.com/*"],

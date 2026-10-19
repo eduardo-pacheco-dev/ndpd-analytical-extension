@@ -1,10 +1,11 @@
 // Content script bridge: receives popup requests and returns the analysis.
-// "NDPD_ANALYZE_ALL" walks the navigator twice: outer (sections/steps/tabs) and,
-// when the active content holds its own stepper/tabs, the inner steps as well.
+// "NDPD_ANALYZE_ALL" walks the navigators recursively (wizard > checklist sections, etc.),
+// rendering and scraping every leaf it finds.
 (function () {
   "use strict";
 
-  const VERSION = 6;
+  const VERSION = 7;
+  const MAX_DEPTH = 4;
   const PREFIX = "[NDPd Analytical]";
 
   function log(...args) {
@@ -31,10 +32,6 @@
 
   function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  function planOf(root) {
-    return window.NdPdAnalyzer.planNavigator(root);
   }
 
   function activeIndex(root, kind) {
@@ -152,139 +149,111 @@
     return { ok: false, reason: "could-not-activate" };
   }
 
-  function emptyCapture() {
-    return { items: [], fields: [], attachments: [] };
+  function combineLabel(prefix, label) {
+    return prefix ? prefix + " › " + label : label;
   }
 
-  // Collects one navigator level; returns the entries (and how many were rendered).
-  async function collectLevel(root, kind, labelPrefix, onProgress, progressBase) {
+  // Chooses the content region for the current navigator, preferring a wrapper that still
+  // holds an inner navigator (e.g. the wizard step that contains the checklist sidebar).
+  function chooseScope(root, navNodes, used) {
     const analyzer = window.NdPdAnalyzer;
-    const items = planOf(root).items;
-    const initialActive = activeIndex(root, kind);
-    const assumedActive = initialActive >= 0 ? initialActive : 0;
-    const entries = [];
+    const candidates = analyzer.contentScopes(root, navNodes);
+    let fallback = null;
+    for (const candidate of candidates) {
+      const child = analyzer.detectNavigator(candidate, used);
+      if (child && child.items.length > 0) return { scope: candidate, child };
+      if (!fallback) fallback = candidate;
+    }
+    return { scope: fallback || root.body || root, child: null };
+  }
 
-    for (let index = 0; index < items.length; index += 1) {
-      const current = planOf(root).items[index] || items[index];
-      if (onProgress && progressBase) {
-        onProgress({
-          current: progressBase.current + index,
-          total: progressBase.total,
-          label: (labelPrefix ? labelPrefix + " › " : "") + current.label,
-        });
-      }
+  // Recursively walks navigators (outer wizard, inner checklist, ...) and captures leaves.
+  async function collectScope(root, prefix, used, entries, onProgress, depth) {
+    const analyzer = window.NdPdAnalyzer;
+
+    if (depth > MAX_DEPTH) {
+      const ref = { label: prefix || "Conteúdo", name: prefix || "Conteúdo", code: prefix || "" };
+      entries.push({ index: entries.length, ref, rendered: true, ...analyzer.captureLeaf(root, ref) });
+      return;
+    }
+
+    const nav = analyzer.detectNavigator(root, used);
+    if (!nav || nav.items.length === 0) {
+      const ref = { label: prefix || "Conteúdo", name: prefix || "Conteúdo", code: prefix || "" };
+      entries.push({ index: entries.length, ref, rendered: true, ...analyzer.captureLeaf(root, ref) });
+      return;
+    }
+
+    const nodes = nav.nodes.slice();
+    for (const node of nodes) used.add(node);
+
+    const initialActive = activeIndex(root, nav.kind);
+    const assumed = initialActive >= 0 ? initialActive : 0;
+
+    log(
+      `${"  ".repeat(depth)}nível ${depth}: ${nav.kind} com ${nav.items.length} item(ns)` +
+        (prefix ? ` dentro de "${prefix}"` : "")
+    );
+
+    for (let index = 0; index < nav.items.length; index += 1) {
+      const item = nav.items[index];
+      const label = combineLabel(prefix, item.label);
+      if (onProgress) onProgress({ current: index + 1, total: nav.items.length, label });
 
       const activation =
-        index === assumedActive && initialActive < 0
+        index === assumed && initialActive < 0
           ? { ok: true, reason: "assumed-active" }
-          : await activate(root, kind, index);
+          : await activate(root, nav.kind, index);
 
-      const fresh = planOf(root).items[index] || current;
-      const captured = activation.ok ? analyzer.captureCurrent(root, kind, fresh) : emptyCapture();
+      const chosen = activation.ok ? chooseScope(root, nodes, used) : { scope: null, child: null };
+      const scope = chosen.scope;
+      const child = chosen.child;
+
+      if (activation.ok && scope && child && child.items.length > 0) {
+        await collectScope(scope, label, used, entries, onProgress, depth + 1);
+        continue;
+      }
+
+      const ref = {
+        ...item,
+        label,
+        name: item.name,
+        code: prefix ? prefix + "." + (item.code || index + 1) : item.code,
+      };
+
+      const captured = activation.ok
+        ? analyzer.captureLeaf(scope || root, ref, nodes)
+        : { items: [], fields: [], attachments: [] };
 
       log(
-        `nível "${labelPrefix || kind}" item ${index + 1}/${items.length} "${current.label}" ok=${activation.ok} (${activation.reason}) ` +
+        `${"  ".repeat(depth)}item ${index + 1}/${nav.items.length} "${label}" ok=${activation.ok} (${activation.reason}) ` +
           `itens=${captured.items.length} campos=${captured.fields.length} anexos=${captured.attachments.length}`
       );
 
-      entries.push({
-        index,
-        ref: {
-          ...fresh,
-          label: (labelPrefix ? labelPrefix + " › " : "") + (fresh.label || fresh.name),
-          code: labelPrefix ? labelPrefix + "." + (fresh.code || index + 1) : fresh.code,
-        },
-        rendered: activation.ok,
-        ...captured,
-      });
+      entries.push({ index: entries.length, ref, rendered: activation.ok, ...captured });
     }
 
-    if (initialActive >= 0 && activeIndex(root, kind) !== initialActive) {
-      await activate(root, kind, initialActive);
-      log(`nível "${labelPrefix || kind}" restaurado no item ${initialActive}.`);
+    if (initialActive >= 0 && activeIndex(root, nav.kind) !== initialActive) {
+      await activate(root, nav.kind, initialActive);
+      log(`${"  ".repeat(depth)}nível ${depth} restaurado no item ${initialActive}.`);
     }
-
-    return entries;
   }
 
   async function collectAll(onProgress) {
     const analyzer = window.NdPdAnalyzer;
-    const outer = planOf(document);
-    const collected = [];
+    const top = analyzer.detectNavigator(document, new Set());
+    const entries = [];
 
     log(
-      "iniciando coleta:",
-      outer.kind,
-      "| navegadores externos =",
-      outer.items.length,
-      "| ativo =",
-      activeIndex(document, outer.kind)
+      "iniciando coleta | navegador externo:",
+      top ? top.kind + "/" + top.items.length : "nenhum"
     );
 
-    if (outer.items.length === 0) {
-      const captured = analyzer.captureCurrent(document, outer.kind, null);
-      collected.push({ index: 0, ref: null, rendered: true, ...captured });
-    } else {
-      const outerActive = activeIndex(document, outer.kind);
-      const assumed = outerActive >= 0 ? outerActive : 0;
+    await collectScope(document, "", new Set(), entries, onProgress, 0);
 
-      for (let index = 0; index < outer.items.length; index += 1) {
-        const current = planOf(document).items[index] || outer.items[index];
-        if (onProgress) onProgress({ current: index + 1, total: outer.items.length, label: current.label });
+    if (onProgress) onProgress({ current: 1, total: 1, done: true });
 
-        const activation =
-          index === assumed && outerActive < 0
-            ? { ok: true, reason: "assumed-active" }
-            : await activate(document, outer.kind, index);
-
-        if (!activation.ok) {
-          log(`externo ${index + 1} "${current.label}" não ativou (${activation.reason}).`);
-          collected.push({
-            index: collected.length,
-            ref: current,
-            rendered: false,
-            ...emptyCapture(),
-          });
-          continue;
-        }
-
-        // Is there a nested navigator (stepper/tabs) inside the active content?
-        const outerNodes = analyzer.navNodes(document, outer.kind);
-        const scope = analyzer.activeContentScope(document, outerNodes);
-        const inner = planOf(scope);
-
-        if (inner.items.length > 1 && inner.kind !== "checklist") {
-          log(
-            `seção "${current.label}" tem navegador interno (${inner.kind}, ${inner.items.length} itens).`
-          );
-          const innerEntries = await collectLevel(
-            scope,
-            inner.kind,
-            current.label,
-            onProgress,
-            { current: index + 1, total: outer.items.length }
-          );
-          for (const entry of innerEntries) {
-            collected.push({ ...entry, index: collected.length });
-          }
-        } else {
-          const captured = analyzer.captureCurrent(document, outer.kind, current, outerNodes);
-          log(
-            `externo ${index + 1} "${current.label}" ok=true (${activation.reason}) itens=${captured.items.length} campos=${captured.fields.length}`
-          );
-          collected.push({ index: collected.length, ref: current, rendered: true, ...captured });
-        }
-      }
-
-      if (outerActive >= 0 && activeIndex(document, outer.kind) !== outerActive) {
-        await activate(document, outer.kind, outerActive);
-        log("posição externa original restaurada:", outerActive);
-      }
-    }
-
-    if (onProgress) onProgress({ current: outer.items.length, total: outer.items.length, done: true });
-
-    const report = analyzer.buildReport(document, location, collected, "all", outer.kind);
+    const report = analyzer.buildReport(document, location, entries, "all", top ? top.kind : "form");
     window.__ndpdLastReport = report;
     log("coleta concluída:", JSON.stringify(report.summary));
     return report;
@@ -294,7 +263,7 @@
     return window.NdPdAnalyzer.analyzeDocument(document, window.location);
   }
 
-  window.NdPdScraper = { collectAll, activate, activeIndex, contentSignature, collectLevel };
+  window.NdPdScraper = { collectAll, collectScope, activate, activeIndex, contentSignature };
 
   function handleMessage(message, _sender, sendResponse) {
     if (!message) return undefined;
@@ -339,29 +308,28 @@
 
   window.__ndpdDiagnostics = function () {
     const analyzer = window.NdPdAnalyzer;
-    const outer = analyzer ? analyzer.planNavigator(document) : { kind: "unknown", items: [] };
-    const scope = analyzer ? analyzer.activeContentScope(document) : null;
-    const inner = analyzer && scope ? analyzer.planNavigator(scope) : { kind: "none", items: [] };
+    if (!analyzer) return { version: VERSION, error: "analisador não carregado" };
+
+    const level0 = analyzer.detectNavigator(document, new Set());
+    const scope0 = analyzer.activeContentScope(document, level0 ? level0.nodes : []);
+    const used1 = new Set(level0 ? level0.nodes : []);
+    const level1 = analyzer.detectNavigator(scope0, used1);
     const sample = Array.from(document.querySelectorAll("[class*='step'], [class*='wizard'], [role='tab']"))
       .filter((node) => node.closest && !node.closest(".cdk-overlay-pane, [role='menu']"))
-      .slice(0, 12)
+      .slice(0, 15)
       .map((node) => node.tagName.toLowerCase() + "." + String(node.className || "").split(" ").slice(0, 2).join("."));
 
     const info = {
       version: VERSION,
       url: location.href,
-      outer: {
-        kind: outer.kind,
-        items: outer.items.map((item) => ({ label: item.label, active: item.active })),
-        activeIndex: activeIndex(document, outer.kind),
+      level0: {
+        kind: level0 ? level0.kind : "none",
+        items: level0 ? level0.items.map((item) => ({ label: item.label, active: item.active })) : [],
       },
-      inner: {
-        kind: inner.kind,
-        items: inner.items.map((item) => ({ label: item.label, active: item.active })),
-        activeIndex: inner.items.length ? activeIndex(scope, inner.kind) : -1,
+      level1: {
+        kind: level1 ? level1.kind : "none",
+        items: level1 ? level1.items.map((item) => ({ label: item.label, active: item.active })) : [],
       },
-      fieldsInView: analyzer ? analyzer.readFields(analyzer.activeContentScope(document)).length : 0,
-      checklistItems: document.querySelectorAll(".content-item").length,
       candidates: {
         matStepHeaders: document.querySelectorAll("mat-step-header, .mat-step-header").length,
         tabLabels: document.querySelectorAll(".mat-tab-label").length,

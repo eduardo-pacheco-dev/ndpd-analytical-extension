@@ -18,7 +18,7 @@ servidor externo**, o que permite funcionar em sistema fechado.
 O popup é o próprio dashboard visual (480px), com gráficos em SVG/CSS puro, sem
 bibliotecas externas:
 
-- **6 KPIs**: itens, aceitos, rejeitados, pendentes, anexos e problemas;
+- **4 KPIs**: itens, aceitos, rejeitados e pendentes (em 2 colunas);
 - **donut** de status com percentual de aceite e legenda;
 - **barras empilhadas** de progresso por seção (aceitos/pendentes/rejeitados/outros);
 - **problemas por tipo** (barras horizontais);
@@ -86,9 +86,10 @@ Se a tela de execução não for uma checklist e sim um **formulário com passos
     `mat-checkbox` e `mat-slide-toggle`;
   - rótulo vindo de `mat-label`, `.input-label`, `label`, `placeholder` ou do título acima;
   - obrigatoriedade detectada por `[required]`, `aria-required` ou marcação `*Required`.
-- **coleta em dois níveis:** se a seção da checklist contém o próprio stepper/abas
-  (ex.: `WizardViewExecutionComponent` dentro da seção), a extensão primeiro troca de seção
-  e depois percorre os **steps internos**, rotulando cada passo como `Seção › Passo`;
+- **coleta em vários níveis (recursiva):** cada nível é resolvido por aninhamento no DOM —
+  o navegador que aparece **primeiro** no documento é o mais externo. Assim funciona tanto
+  `wizard externo → checklist interna` quanto `checklist externa → stepper interno`, e
+  rotula cada folha como `Passo › Seção › ...`;
 - KPIs: **Passos**, **Campos**, **Preenchidos** e **Vazios**;
 - donut de **preenchimento** e barras de **progresso por passo**
   (preenchidos / obrigatórios vazios / opcionais vazios);

@@ -86,28 +86,29 @@
 
   // ---------------------------------------------------------------- checklist
 
+  function itemFromSection(node, index) {
+    const labelEl = node.querySelector(".label");
+    const codeEl = node.querySelector(".bold-label");
+    const badgeEl = node.querySelector(".badge");
+    const badge = parseBadge(badgeEl ? badgeEl.textContent : "");
+    const fullLabel = clean(labelEl ? labelEl.textContent : node.textContent);
+    const code = clean(codeEl ? codeEl.textContent : "");
+    return {
+      index,
+      code,
+      name: code && fullLabel.startsWith(code) ? clean(fullLabel.slice(code.length)) : fullLabel,
+      label: fullLabel || "Seção " + (index + 1),
+      badge: badge.raw,
+      badgeAccepted: badge.accepted,
+      badgeTotal: badge.total,
+      active: hasActiveMarker(node),
+      counts: null,
+      rendered: false,
+    };
+  }
+
   function readSections(doc) {
-    const nodes = doc.querySelectorAll("app-checklist-side-sections .sidebar-item");
-    return Array.from(nodes).map((node, index) => {
-      const labelEl = node.querySelector(".label");
-      const codeEl = node.querySelector(".bold-label");
-      const badgeEl = node.querySelector(".badge");
-      const badge = parseBadge(badgeEl ? badgeEl.textContent : "");
-      const fullLabel = clean(labelEl ? labelEl.textContent : node.textContent);
-      const code = clean(codeEl ? codeEl.textContent : "");
-      return {
-        index,
-        code,
-        name: code && fullLabel.startsWith(code) ? clean(fullLabel.slice(code.length)) : fullLabel,
-        label: fullLabel,
-        badge: badge.raw,
-        badgeAccepted: badge.accepted,
-        badgeTotal: badge.total,
-        active: node.classList.contains("active"),
-        counts: null,
-        rendered: false,
-      };
-    });
+    return navigatorOf(doc, "checklist").items;
   }
 
   function readWorkOrder(doc, location) {
@@ -349,56 +350,74 @@
     return hasActiveMarker(node);
   }
 
+  function itemFromStep(node, index) {
+    const labelEl = node.querySelector(
+      ".mat-step-text-label, .mat-step-label, .mat-tab-label-content, .label, .bold-label"
+    );
+    const label = cleanLabel(labelEl ? labelEl.textContent : node.textContent);
+    return {
+      index,
+      code: String(index + 1),
+      name: label,
+      label: label ? index + 1 + ". " + label : "Passo " + (index + 1),
+      active: hasActiveMarker(node),
+      kind: "step",
+      counts: null,
+      rendered: false,
+    };
+  }
+
+  function itemFromTab(node, index) {
+    const labelEl = node.querySelector(".mat-tab-label-content, .label");
+    const label = cleanLabel(labelEl ? labelEl.textContent : node.textContent);
+    return {
+      index,
+      code: String(index + 1),
+      name: label,
+      label: label || "Aba " + (index + 1),
+      active: hasActiveMarker(node),
+      kind: "tab",
+      counts: null,
+      rendered: false,
+    };
+  }
+
+  function navigatorOf(root, kind, used) {
+    const usedSet = used || new Set();
+    const nodes = navNodes(root, kind).filter((node) => !usedSet.has(node));
+    const builder =
+      kind === "checklist" ? itemFromSection : kind === "steps" ? itemFromStep : itemFromTab;
+    return { kind, nodes, items: nodes.map((node, index) => builder(node, index)) };
+  }
+
+  // Picks the outermost navigator available at this level (whichever appears first in the DOM).
+  function detectNavigator(root, used) {
+    const candidates = ["steps", "tabs", "checklist"]
+      .map((kind) => navigatorOf(root, kind, used))
+      .filter((nav) => nav.nodes.length > 0);
+    if (candidates.length === 0) return null;
+    if (candidates.length === 1) return candidates[0];
+
+    const all = Array.from(root.querySelectorAll("*"));
+    const position = (node) => all.indexOf(node);
+    candidates.sort(
+      (a, b) => position(a.nodes[0]) - position(b.nodes[0]) || b.items.length - a.items.length
+    );
+    return candidates[0];
+  }
+
   function readSteps(doc) {
-    const nodes = navNodes(doc, "steps");
-    return nodes
-      .map((node, index) => {
-        const labelEl = node.querySelector(
-          ".mat-step-text-label, .mat-step-label, .mat-tab-label-content, .label, .bold-label"
-        );
-        const label = cleanLabel(labelEl ? labelEl.textContent : node.textContent);
-        return {
-          index,
-          code: String(index + 1),
-          name: label,
-          label: label ? index + 1 + ". " + label : "Passo " + (index + 1),
-          active: nodeActive("steps", node),
-          kind: "step",
-          counts: null,
-          rendered: false,
-        };
-      })
-      .filter((step) => step.name);
+    return navigatorOf(doc, "steps").items;
   }
 
   function readTabs(doc) {
-    const nodes = navNodes(doc, "tabs");
-    return nodes
-      .map((node, index) => {
-        const labelEl = node.querySelector(".mat-tab-label-content, .label");
-        const label = cleanLabel(labelEl ? labelEl.textContent : node.textContent);
-        return {
-          index,
-          code: String(index + 1),
-          name: label,
-          label,
-          active: nodeActive("tabs", node),
-          kind: "tab",
-          counts: null,
-          rendered: false,
-        };
-      })
-      .filter((tab) => tab.name);
+    return navigatorOf(doc, "tabs").items;
   }
 
   function planNavigator(doc) {
-    const sections = readSections(doc);
-    if (sections.length) return { kind: "checklist", items: sections };
-    const steps = readSteps(doc);
-    if (steps.length) return { kind: "steps", items: steps };
-    const tabs = readTabs(doc);
-    if (tabs.length) return { kind: "tabs", items: tabs };
-    return { kind: "form", items: [] };
+    const nav = detectNavigator(doc, new Set());
+    if (!nav) return { kind: "form", items: [] };
+    return { kind: nav.kind, items: nav.items };
   }
 
   function isHidden(el) {
@@ -579,7 +598,7 @@
     return readAttachments(scope);
   }
 
-  function activeContentScope(root, avoid) {
+  function contentScopes(root, avoid) {
     const selectors = [
       ".mat-stepper-horizontal .mat-horizontal-stepper-content:not([aria-hidden='true'])",
       ".mat-horizontal-stepper-content[aria-expanded='true']",
@@ -594,13 +613,19 @@
       "app-form-view-execution",
       "form",
     ];
+    const found = [];
     for (const selector of selectors) {
       for (const node of root.querySelectorAll(selector)) {
         if (avoid && avoid.length && avoid.some((nav) => nav === node || node.contains(nav))) continue;
-        return node;
+        if (!found.includes(node)) found.push(node);
       }
     }
-    return root.body || root;
+    return found;
+  }
+
+  function activeContentScope(root, avoid) {
+    const scopes = contentScopes(root, avoid);
+    return scopes[0] || root.body || root;
   }
 
   // Builds the checklist report from the collected entries (entry-driven, supports nesting).
@@ -918,10 +943,43 @@
 
   function buildReport(doc, location, collected, mode, kind) {
     const hasFields = collected.some((entry) => (entry.fields || []).length > 0);
-    if (kind !== "checklist" || hasFields) {
+    const hasItems = collected.some((entry) => (entry.items || []).length > 0);
+
+    if (hasItems && !hasFields) {
+      return buildChecklistReport(doc, location, collected, mode);
+    }
+    if (hasFields && !hasItems) {
       return buildFormReport(doc, location, collected, mode, kind);
     }
-    return buildChecklistReport(doc, location, collected, mode);
+    if (hasFields && hasItems) {
+      // Mixed content (wizard with checklist steps and plain fields): keep the form view
+      // since it already groups everything by step/section.
+      return buildFormReport(doc, location, collected, mode, kind);
+    }
+
+    return kind === "checklist"
+      ? buildChecklistReport(doc, location, collected, mode)
+      : buildFormReport(doc, location, collected, mode, kind);
+  }
+
+  // Captures a leaf (no further navigator): test cases when present, otherwise form fields.
+  function captureLeaf(root, ref, avoid) {
+    let nodes = Array.from(root.querySelectorAll(".checklist .content-body .content-item"));
+    if (nodes.length === 0) nodes = Array.from(root.querySelectorAll(".content-item"));
+    if (nodes.length > 0) {
+      const items = nodes.map((node, index) => parseItem(node, index + 1, ref));
+      return {
+        items,
+        fields: [],
+        attachments: items.reduce((all, item) => all.concat(item.attachments), []),
+      };
+    }
+    const scope = activeContentScope(root, avoid);
+    return {
+      items: [],
+      fields: readFields(scope),
+      attachments: readAttachmentsFromScope(scope),
+    };
   }
 
   // Captures the currently rendered content (active section or current step).
@@ -987,7 +1045,11 @@
     buildReport,
     planNavigator,
     captureCurrent,
+    captureLeaf,
     activeContentScope,
+    contentScopes,
+    detectNavigator,
+    navigatorOf,
     navNodes,
     nodeActive,
     hasActiveMarker,
