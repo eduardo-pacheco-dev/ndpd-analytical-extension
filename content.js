@@ -34,6 +34,14 @@
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  // Ticker used for smooth progress; guarded because some test sandboxes lack setInterval.
+  const timer =
+    typeof setInterval === "function" && typeof clearInterval === "function"
+      ? { set: setInterval, clear: clearInterval }
+      : typeof window !== "undefined" && typeof window.setInterval === "function"
+      ? { set: window.setInterval.bind(window), clear: window.clearInterval.bind(window) }
+      : null;
+
   function activeIndex(root, kind) {
     const analyzer = window.NdPdAnalyzer;
     return analyzer.navNodes(root, kind).findIndex((node) => analyzer.nodeActive(kind, node));
@@ -196,54 +204,83 @@
         (prefix ? ` dentro de "${prefix}"` : "")
     );
 
-    const level = { current: 1, total: nav.items.length };
+    const level = { current: 1, total: nav.items.length, sub: 0 };
     levels.push(level);
+
+    const emitProgress = (label) => {
+      if (!onProgress) return;
+      onProgress({
+        current: level.current,
+        total: level.total,
+        label,
+        depth,
+        trail: levels.map((entry) => ({
+          current: entry.current,
+          total: entry.total,
+          sub: entry.sub || 0,
+        })),
+      });
+    };
 
     for (let index = 0; index < nav.items.length; index += 1) {
       const item = nav.items[index];
       const label = combineLabel(prefix, item.label);
       level.current = index + 1;
-      if (onProgress) {
-        onProgress({
-          current: index + 1,
-          total: nav.items.length,
+      level.sub = 0;
+      emitProgress(label);
+
+      // Advances the bar smoothly while the item's content is being activated/scraped.
+      const ticker =
+        onProgress && timer
+          ? timer.set(() => {
+              level.sub = Math.min(0.9, (level.sub || 0) + 0.05);
+              emitProgress(label);
+            }, 220)
+          : null;
+
+      let activation;
+      let chosen;
+      let child;
+      let scope;
+      let captured;
+      try {
+        activation =
+          index === assumed && initialActive < 0
+            ? { ok: true, reason: "assumed-active" }
+            : await activate(root, nav.kind, index);
+
+        chosen = activation.ok ? chooseScope(root, nodes, used) : { scope: null, child: null };
+        scope = chosen.scope;
+        child = chosen.child;
+
+        if (activation.ok && scope && child && child.items.length > 0) {
+          if (ticker) timer.clear(ticker);
+          level.sub = 0;
+          await collectScope(scope, label, used, entries, onProgress, depth + 1, levels);
+          continue;
+        }
+
+        const ref = {
+          ...item,
           label,
-          depth,
-          trail: levels.map((entry) => ({ current: entry.current, total: entry.total })),
-        });
+          name: item.name,
+          code: prefix ? prefix + "." + (item.code || index + 1) : item.code,
+        };
+
+        captured = activation.ok
+          ? analyzer.captureLeaf(scope || root, ref, nodes)
+          : { items: [], fields: [], attachments: [] };
+
+        log(
+          `${"  ".repeat(depth)}item ${index + 1}/${nav.items.length} "${label}" ok=${activation.ok} (${activation.reason}) ` +
+            `itens=${captured.items.length} campos=${captured.fields.length} anexos=${captured.attachments.length}`
+        );
+
+        entries.push({ index: entries.length, ref, rendered: activation.ok, ...captured });
+      } finally {
+        if (ticker) timer.clear(ticker);
+        level.sub = 0;
       }
-
-      const activation =
-        index === assumed && initialActive < 0
-          ? { ok: true, reason: "assumed-active" }
-          : await activate(root, nav.kind, index);
-
-      const chosen = activation.ok ? chooseScope(root, nodes, used) : { scope: null, child: null };
-      const scope = chosen.scope;
-      const child = chosen.child;
-
-      if (activation.ok && scope && child && child.items.length > 0) {
-        await collectScope(scope, label, used, entries, onProgress, depth + 1, levels);
-        continue;
-      }
-
-      const ref = {
-        ...item,
-        label,
-        name: item.name,
-        code: prefix ? prefix + "." + (item.code || index + 1) : item.code,
-      };
-
-      const captured = activation.ok
-        ? analyzer.captureLeaf(scope || root, ref, nodes)
-        : { items: [], fields: [], attachments: [] };
-
-      log(
-        `${"  ".repeat(depth)}item ${index + 1}/${nav.items.length} "${label}" ok=${activation.ok} (${activation.reason}) ` +
-          `itens=${captured.items.length} campos=${captured.fields.length} anexos=${captured.attachments.length}`
-      );
-
-      entries.push({ index: entries.length, ref, rendered: activation.ok, ...captured });
     }
 
     levels.pop();

@@ -252,16 +252,16 @@ function setLoading(isLoading, message) {
 }
 
 // Estimates an overall completion (0-99%) from the nested level trail
-// (e.g. wizard step 2/5, section 1/3), plus the item currently being processed.
+// (e.g. wizard step 2/5, section 1/3), including the current item's sub-progress (0-1).
 function overallPercent(trail) {
   if (!trail || !trail.length) return 0;
   let cum = 1;
   let sum = 0;
   for (const level of trail) {
     cum *= Math.max(1, level.total || 1);
-    sum += Math.max(0, (level.current || 1) - 1) / cum;
+    const position = Math.max(0, (level.current || 1) - 1) + Math.min(1, Math.max(0, level.sub || 0));
+    sum += position / cum;
   }
-  sum += 0.5 / cum;
   return Math.min(99, Math.round(sum * 100));
 }
 

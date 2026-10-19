@@ -19,8 +19,9 @@ O popup é o próprio dashboard visual (480px), com gráficos em SVG/CSS puro, s
 bibliotecas externas:
 
 - **barra de progresso da coleta** logo abaixo do cabeçalho: mostra o caminho atual
-  (ex.: `nível 2 · 3. FCC & Baterias › 3.1 FCC`), o percentual geral estimado a partir da
-  trilha de níveis (wizard → seção → ...) e fica verde/100% ao concluir;
+  (ex.: `nível 2 · 3. FCC & Baterias › 3.1 FCC`), a **porcentagem geral estimada** a partir
+  da trilha de níveis (wizard → seção → ...) e ficando verde/100% ao concluir. O percentual
+  **avança continuamente** enquanto cada item é ativado/lido, não só ao trocar de seção;
 - **4 KPIs**: itens, aceitos, rejeitados e pendentes (em 2 colunas);
 - **donut** de status com percentual de aceite e legenda;
 - **barras empilhadas** de progresso por seção (aceitos/pendentes/rejeitados/outros);
