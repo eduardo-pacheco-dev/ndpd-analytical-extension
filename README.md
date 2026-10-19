@@ -125,14 +125,75 @@ Se alguma seção não puder ser carregada, ela é registrada como
 coletadas normalmente. Para conferir contra a contagem do menu lateral, a extensão
 compara o `badge` (ex.: `10/10`) com o que foi lido no DOM de cada seção.
 
+## Arquitetura
+
+O código é dividido em módulos com responsabilidade única (Clean Architecture / SOLID),
+sem etapa de build. Cada arquivo é um script clássico que se registra no namespace
+`window.NdPd`, e a mesma fábrica é exportada via `module.exports` para os testes em Node.
+
+```
+src/
+  shared/           # texto, constantes e ordem de carregamento (fonte única da verdade)
+  analyzer/         # domínio de leitura do DOM
+    status.js       #   resolução de status (classe/texto)
+    navigation.js   #   detecção de seções, steps e abas
+    attachments.js  #   evidências fotográficas
+    checklist.js    #   caso de teste + validações
+    form.js         #   campos de formulário
+    report.js       #   montagem do relatório (checklist/form)
+    scopes.js       #   descoberta de escopo e captura de folhas
+    analyzer.js     #   fachada (analyzeDocument)
+  content/
+    collector.js    # navegação recursiva + render/scrape (dependências injetadas)
+    bridge.js       # listener de mensagens do popup
+  popup/
+    format.js       # helpers puros (progresso, CSV/JSON, nomes de arquivo)
+    client.js       # acesso a chrome.tabs/scripting (testável com mock)
+    ui.js           # renderização do dashboard
+content.js          # entry do content script (conexão dos módulos + diagnóstico)
+popup.js            # controller do popup (conexão dos módulos)
+```
+
+Princípios aplicados:
+
+- **SRP**: cada módulo trata um único aspecto (status, navegação, formulário, relatório, view).
+- **DIP**: `collector` e `client` recebem `window`, `document`, `clock`, `timers` e `chrome`
+  por injeção, o que permite testá-los sem navegador.
+- **OCP**: adicionar tipos de status/campo é editar `src/shared/constants.js`.
+- **DRY**: `src/shared/scripts.js` é a **fonte única** da ordem dos scripts (usada pelo
+  `manifest.json`, pelo `popup.html`, pela injeção via `chrome.scripting` e pelos testes).
+
+## Testes
+
+```bash
+npm install     # instala o jsdom (única dependência, de desenvolvimento)
+npm test        # unit + integração (node:test)
+npm run test:unit
+npm run test:integration
+npm run test:coverage
+```
+
+- **Unitários**: helpers de texto, status, navegação, checklist, formulário, relatório,
+  formatação/exportação do popup e cliente de `chrome.*` (com mock).
+- **Integração**: DOM real (jsdom) do checklist e do formulário com `analyzeDocument`;
+  coletor percorrendo um stepper (ativas → coleta → restaura a aba original);
+  cadeia completa dos content scripts (registro do listener, `NDPD_ANALYZE`,
+  `__ndpdDiagnostics`); boot do popup com render/erro/exportação.
+- **Estático**: `manifest.json` e `popup.html` são validados contra a ordem de scripts,
+  garantindo que a refatoração não quebre o carregamento da extensão.
+
 ## Arquivos
 
-| Arquivo       | Papel                                                            |
-| ------------- | ---------------------------------------------------------------- |
-| `manifest.json` | MV3, `activeTab` + `scripting`, content script no domínio NDPd. |
-| `analyzer.js` | Extração e validações (função pura sobre o DOM).                 |
-| `content.js`  | Ponte de mensagens entre popup e página.                         |
-| `popup.html` / `popup.js` | Interface em popup: dashboard, gráficos e exportações. |
+| Arquivo                 | Papel                                                          |
+| ----------------------- | -------------------------------------------------------------- |
+| `manifest.json`         | MV3, `activeTab` + `scripting`, content scripts do domínio NDPd. |
+| `src/shared/*`          | Texto, constantes e ordem de scripts (fonte única).            |
+| `src/analyzer/*`        | Extração e validações (função pura sobre o DOM).               |
+| `src/content/*`         | Coletor recursivo e ponte de mensagens.                        |
+| `src/popup/*`           | Lógica pura, cliente `chrome.*` e view do dashboard.           |
+| `content.js`            | Entry do content script (ponte + diagnóstico).                 |
+| `popup.html` / `popup.js` | Popup: dashboard, gráficos e exportações.                   |
+| `test/unit`, `test/integration` | Suíte de testes (Node + jsdom).                        |
 
 ## Permissões
 

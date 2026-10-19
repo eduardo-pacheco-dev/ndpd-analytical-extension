@@ -1,0 +1,15 @@
+{
+  "name": "ndpd-analytical-extension",
+  "version": "1.4.0",
+  "private": true,
+  "description": "Extensão Chrome MV3 que analisa checklists e formulários do NDPd lendo o DOM da aba ativa.",
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\"",
+    "test:unit": "node --test \"test/unit/*.test.js\"",
+    "test:integration": "node --test \"test/integration/*.test.js\"",
+    "test:coverage": "node --test --experimental-test-coverage \"test/**/*.test.js\""
+  },
+  "devDependencies": {
+    "jsdom": "^30.1.3"
+  }
+}

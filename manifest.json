@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "NDPD Analytical",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "description": "Analisa checklists e formulários com steps do NDPd abertos na aba atual: seções, status, campos, anexos e pendências.",
   "permissions": ["activeTab", "scripting"],
   "host_permissions": ["https://*.deliveryplatform.nokia.com/*"],
@@ -12,7 +12,22 @@
   "content_scripts": [
     {
       "matches": ["https://*.deliveryplatform.nokia.com/*"],
-      "js": ["analyzer.js", "content.js"],
+      "js": [
+        "src/shared/text.js",
+        "src/shared/constants.js",
+        "src/analyzer/status.js",
+        "src/analyzer/dom.js",
+        "src/analyzer/navigation.js",
+        "src/analyzer/attachments.js",
+        "src/analyzer/checklist.js",
+        "src/analyzer/form.js",
+        "src/analyzer/report.js",
+        "src/analyzer/scopes.js",
+        "src/analyzer/analyzer.js",
+        "src/content/collector.js",
+        "src/content/bridge.js",
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ]
