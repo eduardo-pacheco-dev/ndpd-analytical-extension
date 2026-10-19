@@ -35,11 +35,15 @@
   }
 
   // Ticker used for smooth progress; guarded because some test sandboxes lack setInterval.
+  // Wrapped in arrow functions so the native timer keeps its required `this` (window).
   const timer =
     typeof setInterval === "function" && typeof clearInterval === "function"
-      ? { set: setInterval, clear: clearInterval }
+      ? { set: (fn, ms) => setInterval(fn, ms), clear: (id) => clearInterval(id) }
       : typeof window !== "undefined" && typeof window.setInterval === "function"
-      ? { set: window.setInterval.bind(window), clear: window.clearInterval.bind(window) }
+      ? {
+          set: (fn, ms) => window.setInterval(fn, ms),
+          clear: (id) => window.clearInterval(id),
+        }
       : null;
 
   function activeIndex(root, kind) {
