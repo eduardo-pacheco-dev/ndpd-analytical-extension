@@ -154,8 +154,12 @@
 
     // Chooses the content region for the current navigator, preferring a wrapper that still
     // holds an inner navigator (e.g. the wizard step that contains the checklist sidebar).
+    // Inactive stepper/tab panels are usually still in the DOM (hidden by CSS), so visible
+    // candidates are preferred to avoid re-reading the previous step.
     function chooseScope(root, navNodes, used) {
-      const candidates = analyzer.contentScopes(root, navNodes);
+      const all = analyzer.contentScopes(root, navNodes);
+      const visible = typeof analyzer.isVisible === "function" ? all.filter((scope) => analyzer.isVisible(scope)) : all;
+      const candidates = visible.length ? visible : all;
       let fallback = null;
       for (const candidate of candidates) {
         const child = analyzer.detectNavigator(candidate, used);

@@ -24,7 +24,7 @@ test("hasActiveMarker detects every documented marker", () => {
       `<div id="selected" aria-selected="true"></div>` +
       `<div id="current" aria-current="step"></div>` +
       `<div id="expanded" aria-expanded="true"></div>` +
-      `<div id="child"><span class="mat-step-label-active"></span></div>` +
+      `<div id="child"><span class="mat-step-label-selected"></span></div>` +
       `<div id="none"></div>`
   );
   assert.equal(nav.hasActiveMarker(document.getElementById("class")), true);

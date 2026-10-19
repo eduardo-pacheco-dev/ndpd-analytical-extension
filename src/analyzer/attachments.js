@@ -51,5 +51,21 @@
     });
   }
 
-  return { attachmentScope, readAttachments };
+  // Reads attachments from several (possibly nested) scopes without duplicates.
+  function readAttachmentsFromScopes(scopes) {
+    const seen = new Set();
+    const all = [];
+    for (const scope of scopes || []) {
+      if (!scope || typeof scope.querySelectorAll !== "function") continue;
+      for (const attachment of readAttachments(scope)) {
+        const key = (attachment.src || "") + "|" + (attachment.name || "");
+        if (seen.has(key)) continue;
+        seen.add(key);
+        all.push(attachment);
+      }
+    }
+    return all;
+  }
+
+  return { attachmentScope, readAttachments, readAttachmentsFromScopes };
 });

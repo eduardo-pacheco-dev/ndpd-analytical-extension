@@ -19,6 +19,35 @@
   const { FIELD_TYPE_LABEL } = constants;
   const { isHidden } = dom;
 
+  // Text-like controls. It intentionally covers both Angular Material controls
+  // (`.mat-input-element`/`matinput`) and the NDPd wrappers (`app-input-box`, `mat-form-field`,
+  // `.input-field`), so a field is not missed just because a class is missing.
+  const TEXT_FIELD_SELECTOR = [
+    "input.mat-input-element",
+    "input[matInput]",
+    "textarea.mat-input-element",
+    "textarea[matInput]",
+    "mat-form-field input",
+    "mat-form-field textarea",
+    "app-input-box input",
+    "app-input-box textarea",
+    "input.input-field",
+    "input.form-control",
+    "textarea.text-area",
+  ].join(",");
+
+  const EXCLUDED_INPUT_TYPES = new Set([
+    "radio",
+    "checkbox",
+    "hidden",
+    "button",
+    "submit",
+    "reset",
+    "image",
+    "file",
+    "range",
+  ]);
+
   function fieldScope(el) {
     return (
       el.closest(
@@ -78,113 +107,186 @@
     return false;
   }
 
-  function readTextFields(scope, fields) {
-    for (const el of scope.querySelectorAll(
-      "input.mat-input-element, input[matinput], textarea.mat-input-element, textarea[matinput]"
-    )) {
-      if (el.type === "radio" || el.type === "checkbox" || el.type === "hidden") continue;
-      if (isHidden(el)) continue;
-      const value = clean(el.value);
-      fields.push({
-        type: el.tagName === "TEXTAREA" ? "textarea" : el.type === "date" ? "date" : "text",
-        typeLabel: el.tagName === "TEXTAREA" ? FIELD_TYPE_LABEL.textarea : FIELD_TYPE_LABEL.text,
-        label: fieldLabel(el, "text"),
-        value,
-        filled: Boolean(value),
-        required: isRequired(el),
-        disabled: Boolean(el.disabled),
-        readonly: Boolean(el.readOnly),
-      });
-    }
+  function isFieldElement(el) {
+    if (!el) return false;
+    if (el.tagName === "INPUT" && EXCLUDED_INPUT_TYPES.has(String(el.type || "").toLowerCase())) return false;
+    if (el.classList && el.classList.contains("text-area-for-image-name")) return false;
+    return true;
   }
 
-  function readSelectFields(scope, fields) {
-    for (const el of scope.querySelectorAll("mat-select")) {
-      if (isHidden(el)) continue;
-      const valueEl = el.querySelector(".mat-select-value-text, .mat-select-min-line");
-      const value = clean(valueEl ? valueEl.textContent : "");
-      const placeholder = clean((el.querySelector(".mat-select-placeholder") || {}).textContent || "");
-      const filled = Boolean(value) && value !== placeholder;
-      fields.push({
-        type: "select",
-        typeLabel: FIELD_TYPE_LABEL.select,
-        label: fieldLabel(el, "select"),
-        value: filled ? value : "",
-        filled,
-        required: isRequired(el),
-        disabled: el.getAttribute("aria-disabled") === "true",
-        readonly: false,
-      });
-    }
+  function selectedOptionText(select) {
+    const option = select.selectedIndex >= 0 ? select.options[select.selectedIndex] : null;
+    return clean(option ? option.textContent : select.value);
   }
 
-  function readRadioFields(scope, fields) {
-    for (const group of scope.querySelectorAll("mat-radio-group")) {
-      if (isHidden(group)) continue;
-      const inputs = Array.from(group.querySelectorAll("input[type=radio]"));
-      const checkedButton = group.querySelector("mat-radio-button.mat-radio-checked");
-      const checkedInput = checkedButton
-        ? checkedButton.querySelector("input[type=radio]")
-        : group.querySelector("input[type=radio]:checked");
-      fields.push({
-        type: "radio",
-        typeLabel: FIELD_TYPE_LABEL.radio,
-        label: fieldLabel(group, "radio"),
-        value: checkedInput ? checkedInput.value : "",
-        filled: Boolean(checkedInput),
-        options: Array.from(group.querySelectorAll("mat-radio-button")).map((b) => clean(b.textContent)),
-        required: isRequired(group),
-        disabled: inputs.length > 0 && inputs.every((input) => input.disabled),
-        readonly: false,
-      });
-    }
+  function buildTextField(el) {
+    const value = clean(el.value);
+    const isTextarea = el.tagName === "TEXTAREA";
+    return {
+      type: isTextarea ? "textarea" : el.type === "date" ? "date" : "text",
+      typeLabel: isTextarea ? FIELD_TYPE_LABEL.textarea : FIELD_TYPE_LABEL.text,
+      label: fieldLabel(el, "text"),
+      value,
+      filled: Boolean(value),
+      required: isRequired(el),
+      disabled: Boolean(el.disabled),
+      readonly: Boolean(el.readOnly),
+    };
   }
 
-  function readCheckboxFields(scope, fields) {
-    for (const el of scope.querySelectorAll("app-check-box, mat-checkbox")) {
-      if (isHidden(el)) continue;
-      const input = el.querySelector("input[type=checkbox]");
-      const checked = el.classList.contains("mat-checkbox-checked") || (input && input.checked);
-      fields.push({
-        type: "checkbox",
-        typeLabel: FIELD_TYPE_LABEL.checkbox,
-        label: fieldLabel(el, "checkbox"),
-        value: checked ? "Sim" : "Não",
-        filled: true,
-        required: isRequired(el),
-        disabled: el.classList.contains("mat-checkbox-disabled") || (input && input.disabled),
-        readonly: false,
-      });
-    }
+  function buildNativeSelectField(el) {
+    const value = selectedOptionText(el);
+    return {
+      type: "select",
+      typeLabel: FIELD_TYPE_LABEL.select,
+      label: fieldLabel(el, "select"),
+      value,
+      filled: Boolean(value),
+      options: Array.from(el.options).map((option) => clean(option.textContent)),
+      required: isRequired(el),
+      disabled: Boolean(el.disabled),
+      readonly: false,
+    };
   }
 
-  function readToggleFields(scope, fields) {
-    for (const el of scope.querySelectorAll("mat-slide-toggle")) {
-      if (isHidden(el)) continue;
-      const checked = el.classList.contains("mat-checked");
-      fields.push({
-        type: "toggle",
-        typeLabel: FIELD_TYPE_LABEL.toggle,
-        label: fieldLabel(el, "toggle"),
-        value: checked ? "Ligado" : "Desligado",
-        filled: true,
-        required: isRequired(el),
-        disabled: el.classList.contains("mat-disabled"),
-        readonly: false,
-      });
+  function buildSelectField(el) {
+    const valueEl = el.querySelector(".mat-select-value-text, .mat-select-min-line");
+    const value = clean(valueEl ? valueEl.textContent : "");
+    const placeholder = clean((el.querySelector(".mat-select-placeholder") || {}).textContent || "");
+    const filled = Boolean(value) && value !== placeholder;
+    return {
+      type: "select",
+      typeLabel: FIELD_TYPE_LABEL.select,
+      label: fieldLabel(el, "select"),
+      value: filled ? value : "",
+      filled,
+      required: isRequired(el),
+      disabled: el.getAttribute("aria-disabled") === "true",
+      readonly: false,
+    };
+  }
+
+  function buildRadioField(group) {
+    const inputs = Array.from(group.querySelectorAll("input[type=radio]"));
+    const checkedButton = group.querySelector("mat-radio-button.mat-radio-checked");
+    const checkedInput = checkedButton
+      ? checkedButton.querySelector("input[type=radio]")
+      : group.querySelector("input[type=radio]:checked");
+    return {
+      type: "radio",
+      typeLabel: FIELD_TYPE_LABEL.radio,
+      label: fieldLabel(group, "radio"),
+      value: checkedInput ? checkedInput.value : "",
+      filled: Boolean(checkedInput),
+      options: Array.from(group.querySelectorAll("mat-radio-button")).map((b) => clean(b.textContent)),
+      required: isRequired(group),
+      disabled: inputs.length > 0 && inputs.every((input) => input.disabled),
+      readonly: false,
+    };
+  }
+
+  function buildCheckboxField(el) {
+    const input = el.querySelector("input[type=checkbox]");
+    const checked = el.classList.contains("mat-checkbox-checked") || (input && input.checked);
+    return {
+      type: "checkbox",
+      typeLabel: FIELD_TYPE_LABEL.checkbox,
+      label: fieldLabel(el, "checkbox"),
+      value: checked ? "Sim" : "Não",
+      filled: true,
+      required: isRequired(el),
+      disabled: el.classList.contains("mat-checkbox-disabled") || (input && input.disabled),
+      readonly: false,
+    };
+  }
+
+  function buildToggleField(el) {
+    const checked = el.classList.contains("mat-checked");
+    return {
+      type: "toggle",
+      typeLabel: FIELD_TYPE_LABEL.toggle,
+      label: fieldLabel(el, "toggle"),
+      value: checked ? "Ligado" : "Desligado",
+      filled: true,
+      required: isRequired(el),
+      disabled: el.classList.contains("mat-disabled"),
+      readonly: false,
+    };
+  }
+
+  function buildButtonToggleField(group) {
+    const buttons = Array.from(group.querySelectorAll("mat-button-toggle, .mat-button-toggle"));
+    const checked = group.querySelector(
+      "mat-button-toggle.mat-button-toggle-checked, .mat-button-toggle-checked, [aria-pressed='true']"
+    );
+    return {
+      type: "button-toggle",
+      typeLabel: FIELD_TYPE_LABEL.buttonToggle,
+      label: fieldLabel(group, "radio"),
+      value: checked ? clean(checked.textContent) : "",
+      filled: Boolean(checked),
+      options: buttons.map((button) => clean(button.textContent)),
+      required: isRequired(group),
+      disabled: group.getAttribute("aria-disabled") === "true" || group.classList.contains("mat-button-toggle-group-disabled"),
+      readonly: false,
+    };
+  }
+
+  const BUILDERS = {
+    text: buildTextField,
+    "native-select": buildNativeSelectField,
+    select: buildSelectField,
+    radio: buildRadioField,
+    checkbox: buildCheckboxField,
+    toggle: buildToggleField,
+    "button-toggle": buildButtonToggleField,
+  };
+
+  // Collects field elements once (document order, deduplicated across overlapping scopes).
+  function collectFieldElements(scopes) {
+    const seen = new Set();
+    const elements = [];
+    const add = (el, kind) => {
+      if (!el || seen.has(el) || !isFieldElement(el) || isHidden(el)) return;
+      seen.add(el);
+      elements.push({ el, kind });
+    };
+    const addAll = (scope, selector, kind) => {
+      if (!scope || typeof scope.querySelectorAll !== "function") return;
+      for (const el of scope.querySelectorAll(selector)) add(el, kind);
+    };
+
+    for (const scope of scopes || []) {
+      addAll(scope, TEXT_FIELD_SELECTOR, "text");
+      addAll(scope, "select", "native-select");
+      addAll(scope, "mat-select", "select");
+      addAll(scope, "mat-radio-group", "radio");
+      addAll(scope, "app-check-box, mat-checkbox", "checkbox");
+      addAll(scope, "mat-slide-toggle", "toggle");
+      addAll(scope, "mat-button-toggle-group", "button-toggle");
     }
+    return elements;
   }
 
   function readFields(scope) {
     if (!scope) return [];
-    const fields = [];
-    readTextFields(scope, fields);
-    readSelectFields(scope, fields);
-    readRadioFields(scope, fields);
-    readCheckboxFields(scope, fields);
-    readToggleFields(scope, fields);
-    return fields;
+    return readFieldsFromScopes([scope]);
   }
 
-  return { fieldScope, nearbyHeading, fieldLabel, isRequired, readFields };
+  // Reads fields from several (possibly nested) scopes, without duplicating a field
+  // that appears in more than one container.
+  function readFieldsFromScopes(scopes) {
+    return collectFieldElements(scopes).map(({ el, kind }) => BUILDERS[kind](el));
+  }
+
+  return {
+    fieldScope,
+    nearbyHeading,
+    fieldLabel,
+    isRequired,
+    readFields,
+    readFieldsFromScopes,
+    collectFieldElements,
+    TEXT_FIELD_SELECTOR,
+  };
 });

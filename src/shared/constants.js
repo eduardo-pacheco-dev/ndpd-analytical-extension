@@ -67,6 +67,7 @@
     radio: "Escolha única",
     checkbox: "Caixa de seleção",
     toggle: "Interruptor",
+    buttonToggle: "Botões de alternância",
     date: "Data",
   };
 

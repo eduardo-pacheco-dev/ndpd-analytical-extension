@@ -29,5 +29,23 @@
     return false;
   }
 
-  return { headerElement, isHidden };
+  // Broader visibility check that also understands CSS-driven hiding (inactive steps/tabs
+  // are often hidden with a class, not with inline styles). `checkVisibility` is used when
+  // the browser provides it; otherwise the attribute/inline-style check is authoritative
+  // (jsdom has no layout engine, so `offsetParent` is always null there).
+  function isVisible(el) {
+    if (!el || el.nodeType !== 1) return false;
+    if (el.hasAttribute && el.hasAttribute("hidden")) return false;
+    if (isHidden(el)) return false;
+    if (typeof el.checkVisibility === "function") {
+      try {
+        return el.checkVisibility({ checkVisibilityCSS: true, checkOpacity: false });
+      } catch (error) {
+        return true;
+      }
+    }
+    return true;
+  }
+
+  return { headerElement, isHidden, isVisible };
 });

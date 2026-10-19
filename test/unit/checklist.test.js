@@ -113,6 +113,25 @@ test("unnamed attachments are flagged", () => {
   assert.ok(item.issues.some((entry) => entry.code === "attachment-unnamed"));
 });
 
+test("readItemInputs also captures selects, checkboxes and toggles as field data", () => {
+  const item = parse(
+    `<div><h4>Item</h4><span class="accepted-state"></span></div>` +
+      `<mat-select><span class="mat-select-value-text">Opção A</span></mat-select>` +
+      `<mat-checkbox class="mat-checkbox-checked"><input type="checkbox" checked /></mat-checkbox>` +
+      `<mat-slide-toggle class="mat-checked"></mat-slide-toggle>` +
+      `<textarea class="text-area-for-image-name">foto.png</textarea>`
+  );
+
+  assert.deepEqual(
+    item.inputs.map((input) => [input.label, input.value]),
+    [
+      ["(sem rótulo)", "Opção A"],
+      ["(sem rótulo)", "Sim"],
+      ["(sem rótulo)", "Ligado"],
+    ]
+  );
+});
+
 test("readWorkOrder reads URL params and the header", () => {
   const { document, location } = makeDom(
     `<app-execution-view><span class="rex-font-header-3">Cabeçalho</span></app-execution-view>`,

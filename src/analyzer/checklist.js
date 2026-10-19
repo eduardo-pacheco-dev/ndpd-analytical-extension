@@ -31,25 +31,90 @@
 
   const { clean } = text;
   const { STATUS_LABEL, REQUIREMENT_LABEL } = constants;
-  const { headerElement } = dom;
+  const { headerElement, isHidden } = dom;
   const { resolveStatus, firstStatusIn } = status;
   const { readAttachments } = attachments;
 
   const PHOTO_RE = /foto|imagem|anexo/i;
 
+  const ITEM_INPUT_TYPES = new Set(["radio", "checkbox", "hidden", "button", "submit", "reset", "image", "file"]);
+
+  const ITEM_CONTROL_SELECTOR = [
+    "input.mat-input-element",
+    "input[matInput]",
+    "textarea.mat-input-element",
+    "textarea[matInput]",
+    "app-input-box input",
+    "app-input-box textarea",
+    "mat-form-field input",
+    "mat-form-field textarea",
+    "mat-select",
+    "select",
+    "app-check-box",
+    "mat-checkbox",
+    "mat-slide-toggle",
+  ].join(",");
+
+  const CONTROL_LABEL_SELECTOR =
+    "mat-label, .input-label, .radio-label, .checkbox__lable, .input-field-parent label, label";
+
+  function controlLabel(el) {
+    const attr = clean(
+      el.getAttribute("placeholder") || el.getAttribute("data-placeholder") || el.getAttribute("aria-label") || ""
+    );
+    if (attr) return attr;
+    const scope = el.closest(
+      "mat-form-field, app-input-box, app-select-box, app-check-box, mat-checkbox, mat-slide-toggle, .input-field-parent, .form-field, .checkbox"
+    );
+    const labelEl = scope ? scope.querySelector(CONTROL_LABEL_SELECTOR) : null;
+    const text = clean(labelEl ? labelEl.textContent : "");
+    return text || "(sem rótulo)";
+  }
+
+  // Returns a flat { label, value, ... } entry for any control type found in an item.
+  function controlValue(el) {
+    const tag = el.tagName;
+    if (tag === "SELECT") {
+      const option = el.selectedIndex >= 0 ? el.options[el.selectedIndex] : null;
+      return clean(option ? option.textContent : el.value);
+    }
+    if (tag === "MAT-SELECT") {
+      const valueEl = el.querySelector(".mat-select-value-text, .mat-select-min-line");
+      return clean(valueEl ? valueEl.textContent : "");
+    }
+    if (tag === "MAT-CHECKBOX" || tag === "APP-CHECK-BOX" || (el.classList && el.classList.contains("app-checkbox"))) {
+      const input = el.querySelector("input[type=checkbox]");
+      return el.classList.contains("mat-checkbox-checked") || (input && input.checked) ? "Sim" : "Não";
+    }
+    if (tag === "MAT-SLIDE-TOGGLE") {
+      return el.classList.contains("mat-checked") ? "Ligado" : "Desligado";
+    }
+    return clean(el.value);
+  }
+
+  function controlDisabled(el) {
+    if (el.tagName === "MAT-SELECT") return el.getAttribute("aria-disabled") === "true";
+    if (el.tagName === "MAT-CHECKBOX" || el.tagName === "APP-CHECK-BOX" || el.hasAttribute("mat-checkbox")) {
+      const input = el.querySelector("input[type=checkbox]");
+      return el.classList.contains("mat-checkbox-disabled") || (input && input.disabled);
+    }
+    if (el.tagName === "MAT-SLIDE-TOGGLE") return el.classList.contains("mat-disabled");
+    return Boolean(el.disabled);
+  }
+
   function readItemInputs(item) {
-    const nodes = item.querySelectorAll("input.mat-input-element, textarea.mat-input-element");
-    return Array.from(nodes).map((el) => ({
-      label: clean(
-        el.getAttribute("placeholder") ||
-          el.getAttribute("data-placeholder") ||
-          el.getAttribute("aria-label") ||
-          ""
-      ),
-      value: clean(el.value),
-      disabled: Boolean(el.disabled),
-      readonly: Boolean(el.readOnly),
-    }));
+    return Array.from(item.querySelectorAll(ITEM_CONTROL_SELECTOR))
+      .filter((el) => {
+        if (el.tagName === "INPUT" && ITEM_INPUT_TYPES.has(String(el.type || "").toLowerCase())) return false;
+        if (el.classList && el.classList.contains("text-area-for-image-name")) return false;
+        return !isHidden(el);
+      })
+      .map((el) => ({
+        label: controlLabel(el),
+        value: controlValue(el),
+        disabled: controlDisabled(el),
+        readonly: Boolean(el.readOnly),
+      }));
   }
 
   function readRadio(item) {

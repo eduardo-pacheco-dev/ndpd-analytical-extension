@@ -18,11 +18,18 @@
     steps: [
       "mat-step-header",
       "[role='tablist'] [role='tab']",
+      ".mat-step-header",
+      ".mat-mdc-step-header",
       ".mat-tab-group .mat-tab-label",
+      ".mat-mdc-tab-group .mat-mdc-tab-label",
       ".mat-stepper-horizontal .mat-step-header",
       ".mat-stepper-vertical .mat-step-header",
     ],
-    tabs: ["mat-tab-group .mat-tab-label", "[role='tablist'] [role='tab']"],
+    tabs: [
+      "[role='tablist'] [role='tab']",
+      "mat-tab-group .mat-tab-label",
+      ".mat-mdc-tab-group .mat-mdc-tab-label",
+    ],
   };
 
   function navNodes(doc, kind) {
@@ -49,9 +56,15 @@
     const current = node.getAttribute && node.getAttribute("aria-current");
     if (current === "true" || current === "step" || current === "page") return true;
     if (node.getAttribute && node.getAttribute("aria-expanded") === "true") return true;
+    // NOTE: `.mat-step-label-active` is present on EVERY Material stepper label (active or
+    // not), so it must never be treated as an "active" marker. Only the truly selected
+    // variants are reliable.
     if (
       node.querySelector &&
-      node.querySelector(".mat-step-label-active, .mat-tab-label-active, .mat-step-header-selected")
+      node.querySelector(
+        ".mat-step-label-selected, .mat-step-header-selected, .mat-tab-label-active," +
+          ".mat-mdc-tab-label-active, .mdc-tab--active, .mat-mdc-step-active"
+      )
     ) {
       return true;
     }
