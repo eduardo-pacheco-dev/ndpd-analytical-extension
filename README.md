@@ -38,9 +38,10 @@ Ideal para print: aumente o zoom do popup se quiser letras maiores, ou use
 - Console da página (F12 → Console): a extensão loga com o prefixo `[NDPd Analytical]`
   (registro do content script, cada seção/passo ativado com o motivo — `active`,
   `content-changed`, `assumed-active` — e os campos lidos).
-- `window.__ndpdDiagnostics()` mostra versão, modo detectado (`kind`), itens de navegação com
-  o estado ativo, campos visíveis e **candidatos** (`matStepHeaders`, `tabLabels`, `roleTabs`,
-  `tablists` + amostra de classes) — útil quando algum step não é reconhecido.
+- `window.__ndpdDiagnostics()` mostra versão, **nível externo** (seções/steps com estado ativo),
+  **nível interno** (stepper/abas dentro do conteúdo), campos visíveis e **candidatos**
+  (`matStepHeaders`, `tabLabels`, `roleTabs`, `tablists`, `sidebarItems` + amostra de classes) —
+  útil quando algum passo não é reconhecido.
 - Console do popup (clique direito no popup → Inspecionar) mostra cada tentativa de
   leitura/injeção e o resumo final.
 
@@ -85,6 +86,9 @@ Se a tela de execução não for uma checklist e sim um **formulário com passos
     `mat-checkbox` e `mat-slide-toggle`;
   - rótulo vindo de `mat-label`, `.input-label`, `label`, `placeholder` ou do título acima;
   - obrigatoriedade detectada por `[required]`, `aria-required` ou marcação `*Required`.
+- **coleta em dois níveis:** se a seção da checklist contém o próprio stepper/abas
+  (ex.: `WizardViewExecutionComponent` dentro da seção), a extensão primeiro troca de seção
+  e depois percorre os **steps internos**, rotulando cada passo como `Seção › Passo`;
 - KPIs: **Passos**, **Campos**, **Preenchidos** e **Vazios**;
 - donut de **preenchimento** e barras de **progresso por passo**
   (preenchidos / obrigatórios vazios / opcionais vazios);
@@ -94,7 +98,7 @@ Se a tela de execução não for uma checklist e sim um **formulário com passos
   `Passo; Campo; Tipo; Obrigatorio; Preenchido; Valor; Problemas`.
 
 O mesmo botão **Coletar tudo** funciona nos dois modos; **Seção atual** lê apenas o passo/seção
-aberto. `window.__ndpdDiagnostics()` mostra qual modo foi detectado (`kind`).
+aberto. `window.__ndpdDiagnostics()` mostra qual modo foi detectado (níveis `outer` e `inner`).
 
 ## Coleta de todas as seções (checklist)
 

@@ -579,46 +579,84 @@
     return readAttachments(scope);
   }
 
-  function activeContentScope(doc) {
+  function activeContentScope(root, avoid) {
     const selectors = [
       ".mat-stepper-horizontal .mat-horizontal-stepper-content:not([aria-hidden='true'])",
       ".mat-horizontal-stepper-content[aria-expanded='true']",
       ".mat-vertical-stepper-content[aria-expanded='true']",
       ".mat-tab-body-active",
       ".mat-step-content",
+      ".content-body",
       ".page-body-content",
+      ".step-host",
+      ".stepper-content",
+      ".wizard-content",
+      "app-form-view-execution",
       "form",
     ];
     for (const selector of selectors) {
-      const node = doc.querySelector(selector);
-      if (node) return node;
+      for (const node of root.querySelectorAll(selector)) {
+        if (avoid && avoid.length && avoid.some((nav) => nav === node || node.contains(nav))) continue;
+        return node;
+      }
     }
-    return doc.body || doc;
+    return root.body || root;
   }
 
-  // ---------------------------------------------------------------- reports
-
+  // Builds the checklist report from the collected entries (entry-driven, supports nesting).
   function buildChecklistReport(doc, location, collected, mode) {
-    const sections = readSections(doc);
-    const entryByIndex = new Map();
-    for (const entry of collected) {
-      if (entry.ref) entryByIndex.set(entry.index, entry);
-    }
-
-    const orderedSections = sections.map((section) => {
-      const entry = entryByIndex.get(section.index);
-      if (!entry) return section;
-      const accepted = entry.items.filter((item) => item.status === "accepted").length;
-      return Object.assign({}, section, {
-        rendered: entry.rendered,
-        counts: { accepted, total: entry.items.length },
-      });
+    let sections = collected.map((entry, index) => {
+      const ref = entry.ref || {};
+      const items = entry.items || [];
+      return {
+        index,
+        code: ref.code || "",
+        name: ref.name || ref.label || "Seção " + (index + 1),
+        label: ref.label || ref.name || "Seção " + (index + 1),
+        badge: ref.badge || "",
+        badgeAccepted: ref.badgeAccepted == null ? null : ref.badgeAccepted,
+        badgeTotal: ref.badgeTotal == null ? null : ref.badgeTotal,
+        active: Boolean(ref.active),
+        rendered: Boolean(entry.rendered),
+        counts: {
+          accepted: items.filter((item) => item.status === "accepted").length,
+          total: items.length,
+        },
+      };
     });
 
-    const items = collected.reduce((all, entry) => all.concat(entry.items), []);
-    const countedStatuses = ["accepted", "rejected", "pending", "performed"];
+    // In "active section only" mode, still list every section of the sidebar.
+    if (mode === "active") {
+      const domSections = readSections(doc);
+      const activeEntry = collected[0];
+      const activeRefIndex = activeEntry && activeEntry.ref ? activeEntry.ref.index : -1;
+      if (domSections.length > 0) {
+        sections = domSections.map((section) => {
+          const isActive = section.index === activeRefIndex;
+          const items = isActive ? (activeEntry.items || []) : [];
+          return {
+            ...section,
+            rendered: isActive,
+            counts: {
+              accepted: items.filter((item) => item.status === "accepted").length,
+              total: items.length,
+            },
+          };
+        });
+      }
+    }
 
+    const items = [];
+    for (let index = 0; index < collected.length; index += 1) {
+      const section = sections[index];
+      for (const item of collected[index].items || []) {
+        items.push({ ...item, sectionCode: section.code, sectionLabel: section.label });
+      }
+    }
+
+    const countedStatuses = ["accepted", "rejected", "pending", "performed"];
     const summary = {
+      kind: "checklist",
       sections: sections.length,
       sectionsCollected: collected.filter((entry) => entry.rendered).length,
       items: items.length,
@@ -642,42 +680,43 @@
       }
     }
 
-    for (const entry of collected) {
-      const section = entry.ref;
-      const label = section ? section.label : "";
+    for (let index = 0; index < collected.length; index += 1) {
+      const entry = collected[index];
+      const section = sections[index];
+      const label = section.label;
 
-      if (!entry.rendered) {
+      if (!entry.rendered && mode !== "active") {
         issues.push({
           severity: "warning",
           code: "section-not-loaded",
-          message: `Não foi possível carregar a seção "${label}" para coleta.`,
+          message: `Não foi possível carregar "${label}" para coleta.`,
           section: label,
         });
         continue;
       }
+      if (!entry.rendered) continue;
 
-      if (section && section.badgeAccepted != null) {
-        const accepted = entry.items.filter((item) => item.status === "accepted").length;
-        if (section.badgeAccepted !== accepted) {
+      if (section.badgeAccepted != null) {
+        if (section.badgeAccepted !== section.counts.accepted) {
           issues.push({
             severity: "warning",
             code: "badge-mismatch-accepted",
-            message: `Menu lateral indica ${section.badgeAccepted} aceito(s), mas o DOM mostra ${accepted}.`,
+            message: `Menu lateral indica ${section.badgeAccepted} aceito(s), mas o DOM mostra ${section.counts.accepted}.`,
             section: label,
           });
         }
       }
-      if (section && section.badgeTotal != null && section.badgeTotal !== entry.items.length) {
+      if (section.badgeTotal != null && section.badgeTotal !== section.counts.total) {
         issues.push({
           severity: "warning",
           code: "badge-mismatch-total",
-          message: `Menu lateral indica ${section.badgeTotal} item(ns), mas o DOM mostra ${entry.items.length}.`,
+          message: `Menu lateral indica ${section.badgeTotal} item(ns), mas o DOM mostra ${section.counts.total}.`,
           section: label,
         });
       }
 
       const byName = new Map();
-      for (const item of entry.items) {
+      for (const item of entry.items || []) {
         for (const attachment of item.attachments) {
           const key = attachment.name.toLowerCase();
           if (!key) continue;
@@ -714,7 +753,7 @@
     ];
     if (mode === "all") {
       notes.unshift(
-        `Coleta completa: ${summary.sectionsCollected}/${summary.sections} seção(ões) renderizada(s) e coletada(s).`
+        `Coleta completa: ${summary.sectionsCollected}/${summary.sections} seção(ões)/passo(s) renderizado(s) e coletado(s).`
       );
     }
 
@@ -724,46 +763,43 @@
       kind: "checklist",
       page: { title: clean(doc.title), url: location.href },
       workOrder: readWorkOrder(doc, location),
-      sections: orderedSections,
+      sections,
       steps: [],
       items,
       fields: [],
+      attachments: [],
       summary,
       issues,
       notes,
     };
   }
 
+  // Builds the form report from the collected entries (entry-driven, supports nesting).
   function buildFormReport(doc, location, collected, mode, kind) {
-    const navigator = planNavigator(doc);
-    const refByIndex = new Map();
-    for (const entry of collected) {
-      if (entry.ref) refByIndex.set(entry.index, entry);
-    }
-
-    const steps = navigator.items.map((step) => {
-      const entry = refByIndex.get(step.index);
-      if (!entry) return step;
+    const steps = collected.map((entry, index) => {
+      const ref = entry.ref || {};
       const fields = entry.fields || [];
-      return Object.assign({}, step, {
-        rendered: entry.rendered,
+      return {
+        index,
+        code: ref.code || String(index + 1),
+        name: ref.name || ref.label || "Passo " + (index + 1),
+        label: ref.label || ref.name || "Passo " + (index + 1),
+        active: Boolean(ref.active),
+        rendered: Boolean(entry.rendered),
+        kind: "step",
         counts: {
           total: fields.length,
           filled: fields.filter((field) => field.filled).length,
           required: fields.filter((field) => field.required).length,
           requiredEmpty: fields.filter((field) => field.required && !field.filled).length,
         },
-      });
+      };
     });
 
     const fields = [];
-    for (const entry of collected) {
-      for (const field of entry.fields || []) {
-        fields.push({
-          ...field,
-          stepIndex: entry.index + 1,
-          stepLabel: entry.ref ? entry.ref.label : "",
-        });
+    for (let index = 0; index < collected.length; index += 1) {
+      for (const field of collected[index].fields || []) {
+        fields.push({ ...field, stepIndex: index + 1, stepLabel: steps[index].label });
       }
     }
 
@@ -809,9 +845,9 @@
       }
     }
 
-    for (const entry of collected) {
-      const step = entry.ref;
-      const label = step ? step.label : "";
+    for (let index = 0; index < collected.length; index += 1) {
+      const entry = collected[index];
+      const label = steps[index].label;
       if (!entry.rendered) {
         issues.push({
           severity: "warning",
@@ -853,7 +889,7 @@
     summary.issues = issues.length;
 
     const notes = [
-      "Formulário com passos: os campos foram lidos passo a passo e a tela voltou ao passo original.",
+      "Formulário com passos: os campos foram lidos passo a passo e a tela voltou ao estado original.",
       "Os dados são lidos diretamente da página aberta, sem acesso a servidores externos.",
       "Validações automáticas são indicativas e não substituem a conferência humana.",
     ];
@@ -881,16 +917,25 @@
   }
 
   function buildReport(doc, location, collected, mode, kind) {
-    if (kind === "checklist") return buildChecklistReport(doc, location, collected, mode);
-    return buildFormReport(doc, location, collected, mode, kind);
+    const hasFields = collected.some((entry) => (entry.fields || []).length > 0);
+    if (kind !== "checklist" || hasFields) {
+      return buildFormReport(doc, location, collected, mode, kind);
+    }
+    return buildChecklistReport(doc, location, collected, mode);
   }
 
   // Captures the currently rendered content (active section or current step).
-  function captureCurrent(doc, kind, ref) {
+  function captureCurrent(root, kind, ref, avoid) {
     if (kind === "checklist") {
-      return { items: readItems(doc, ref), fields: [], attachments: [] };
+      let nodes = Array.from(root.querySelectorAll(".checklist .content-body .content-item"));
+      if (nodes.length === 0) nodes = Array.from(root.querySelectorAll(".content-item"));
+      return {
+        items: nodes.map((node, index) => parseItem(node, index + 1, ref)),
+        fields: [],
+        attachments: [],
+      };
     }
-    const scope = activeContentScope(doc);
+    const scope = activeContentScope(root, avoid);
     return {
       items: [],
       fields: readFields(scope),
