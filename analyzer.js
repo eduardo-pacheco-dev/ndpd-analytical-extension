@@ -25,6 +25,14 @@
     "rejected-state-ai": "rejected",
     "pending-state": "pending",
     "performed-state": "performed",
+    "submitted-state": "awaiting",
+    "resubmitted-state": "awaiting",
+    "submit-state": "awaiting",
+    "resubmit-state": "awaiting",
+    "awaiting-state": "awaiting",
+    "awaiting-evaluation-state": "awaiting",
+    "under-review-state": "awaiting",
+    "evaluation-state": "awaiting",
   };
 
   const STATUS_LABEL = {
@@ -32,8 +40,24 @@
     rejected: "Rejeitado",
     pending: "Pendente",
     performed: "Executado",
+    awaiting: "Aguardando avaliação",
     unknown: "Sem status",
   };
+
+  // "Submitted"/"Resubmitted" (etc.) mean the item is waiting for evaluation.
+  const AWAITING_RE = /resubmit|submit|aguard|avali|waiting|under.?review|em an[áa]lise/i;
+
+  function resolveStatus(statusEl, headerText) {
+    if (statusEl) {
+      const byClass = readStatus(statusEl);
+      if (byClass !== "unknown") return byClass;
+      if (AWAITING_RE.test(clean(statusEl.textContent))) return "awaiting";
+    }
+    const haystack = clean((statusEl ? statusEl.textContent : "") + " " + (headerText || ""));
+    if (AWAITING_RE.test(haystack)) return "awaiting";
+    // Items without any recognizable status are treated as pending.
+    return "pending";
+  }
 
   const REQUIREMENT_LABEL = {
     required: "Obrigatório",
@@ -274,7 +298,7 @@
         ? "optional"
         : "unknown";
     const statusEl = firstStatusIn(header);
-    const status = statusEl ? readStatus(statusEl) : "unknown";
+    const status = resolveStatus(statusEl, headerText);
 
     const item = {
       index,
@@ -282,7 +306,12 @@
       requirement,
       requirementLabel: REQUIREMENT_LABEL[requirement],
       status,
-      statusLabel: statusEl ? clean(statusEl.textContent) : STATUS_LABEL[status],
+      statusLabel:
+        status === "awaiting"
+          ? STATUS_LABEL.awaiting
+          : statusEl
+            ? clean(statusEl.textContent)
+            : STATUS_LABEL[status],
       sectionCode: section ? section.code : "",
       sectionLabel: section ? section.label : "",
       radio: readRadio(node),
@@ -679,7 +708,7 @@
       }
     }
 
-    const countedStatuses = ["accepted", "rejected", "pending", "performed"];
+    const countedStatuses = ["accepted", "rejected", "pending", "performed", "awaiting"];
     const summary = {
       kind: "checklist",
       sections: sections.length,
@@ -688,6 +717,7 @@
       accepted: items.filter((item) => item.status === "accepted").length,
       rejected: items.filter((item) => item.status === "rejected").length,
       pending: items.filter((item) => item.status === "pending").length,
+      awaiting: items.filter((item) => item.status === "awaiting").length,
       other: items.filter((item) => !countedStatuses.includes(item.status)).length,
       required: items.filter((item) => item.requirement === "required").length,
       optional: items.filter((item) => item.requirement === "optional").length,

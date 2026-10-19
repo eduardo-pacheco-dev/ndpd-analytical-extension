@@ -7,6 +7,7 @@ const STATUS_COLORS = {
   rejected: "#f87171",
   pending: "#fbbf24",
   performed: "#60a5fa",
+  awaiting: "#a78bfa",
   other: "#8ea3c0",
 };
 
@@ -15,6 +16,7 @@ const STATUS_LABELS = {
   rejected: "Rejeitados",
   pending: "Pendentes",
   performed: "Executados",
+  awaiting: "Aguardando avaliação",
   other: "Sem status",
 };
 
@@ -310,7 +312,7 @@ function render(data) {
 }
 
 function renderChecklist(data) {
-  const statusCounts = { accepted: 0, rejected: 0, pending: 0, performed: 0, other: 0 };
+  const statusCounts = { accepted: 0, rejected: 0, pending: 0, performed: 0, awaiting: 0, other: 0 };
   for (const item of data.items) {
     if (statusCounts[item.status] === undefined || item.status === "unknown") statusCounts.other += 1;
     else statusCounts[item.status] += 1;
@@ -331,6 +333,7 @@ function renderChecklist(data) {
     [
       { key: "accepted", label: "Aceitos", value: statusCounts.accepted, color: STATUS_COLORS.accepted },
       { key: "pending", label: "Pendentes", value: statusCounts.pending, color: STATUS_COLORS.pending },
+      { key: "awaiting", label: "Aguardando avaliação", value: statusCounts.awaiting, color: STATUS_COLORS.awaiting },
       { key: "rejected", label: "Rejeitados", value: statusCounts.rejected, color: STATUS_COLORS.rejected },
       { key: "performed", label: "Executados", value: statusCounts.performed, color: STATUS_COLORS.performed },
       { key: "other", label: "Sem status", value: statusCounts.other, color: STATUS_COLORS.other },

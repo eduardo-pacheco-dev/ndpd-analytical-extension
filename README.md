@@ -69,7 +69,11 @@ Dependendo da tela, a extensão escolhe o modo **checklist** ou **formulário (s
 
 **Modo checklist:**
 
-- **Resumo (inventário):** seções, itens, aceitos, rejeitados, pendentes e anexos.
+- **Resumo (inventário):** seções, itens, aceitos, rejeitados, pendentes, aguardando
+  avaliação e anexos.
+- **Status dos itens:** além de Aceito/Rejeitado/Pendente, itens com **submit/resubmitted**
+  (classe ou texto) são classificados como **Aguardando avaliação**, e itens **sem nenhum
+  indicador de status** passam a contar como **Pendente**.
 - **Validações:**
   - item obrigatório sem aceite/rejeição;
   - item pendente / rejeitado;
