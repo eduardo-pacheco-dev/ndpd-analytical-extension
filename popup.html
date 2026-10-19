@@ -165,6 +165,24 @@
         margin-bottom: 3px;
         color: #fca5a5;
       }
+      .idle {
+        margin: 12px 14px;
+        padding: 14px;
+        border: 1px dashed var(--line);
+        border-radius: 12px;
+        color: var(--text);
+        line-height: 1.5;
+        font-size: 12px;
+      }
+      .idle p {
+        margin: 0;
+      }
+      .idle p + p {
+        margin-top: 6px;
+      }
+      .idle .muted {
+        color: var(--muted);
+      }
       .card {
         padding: 12px 13px;
         margin-bottom: 10px;
@@ -537,7 +555,7 @@
         <span class="logo">∑</span>
         <div>
           <h1>NDPd Analytical</h1>
-          <span class="status" id="status">Analisando a aba atual…</span>
+          <span class="status" id="status">Pronto. Clique em Coletar tudo.</span>
         </div>
       </div>
       <button class="icon-btn" id="refresh" title="Reanalisar">↻</button>
@@ -552,6 +570,11 @@
     </div>
 
     <div class="error-box hidden" id="error"></div>
+
+    <div class="idle" id="idle">
+      <p>Clique em <strong>Coletar tudo</strong> para percorrer todas as seções/passos do checklist aberto.</p>
+      <p class="muted">Ou em <strong>Seção atual</strong> para ler apenas o que está aberto agora.</p>
+    </div>
 
     <main id="result" class="hidden">
       <div class="card workorder" id="workorder"></div>

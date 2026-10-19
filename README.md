@@ -8,8 +8,10 @@ servidor externo**, o que permite funcionar em sistema fechado.
 
 1. Recarregue a extensão em `chrome://extensions` (modo desenvolvedor → “Recarregar”).
 2. Abra a tela de execução do checklist no NDPd.
-3. Clique no ícone da extensão. O popup coleta **todas as seções** automaticamente
-   (ele percorre o menu lateral, renderiza cada seção e volta para a seção original).
+3. Clique no ícone da extensão. Ao abrir, o popup **não coleta nada** (mostra apenas a
+   instrução). Clique em **Coletar tudo** para percorrer **todas as seções/passos** — ele
+   ativa cada item do navegador (menu lateral, wizard, abas), renderiza e volta à posição
+   original.
 4. Use **↻** / **Coletar tudo** para reexecutar, **Seção atual** para ler só o que está
    aberto, e **JSON** / **CSV** para exportar.
 

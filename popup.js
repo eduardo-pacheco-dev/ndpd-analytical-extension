@@ -47,6 +47,7 @@ const SEVERITY_COLORS = { error: "#f87171", warning: "#fbbf24", info: "#60a5fa" 
 const statusEl = document.getElementById("status");
 const errorEl = document.getElementById("error");
 const resultEl = document.getElementById("result");
+const idleEl = document.getElementById("idle");
 const workorderEl = document.getElementById("workorder");
 const kpisEl = document.getElementById("kpis");
 const donutEl = document.getElementById("donut");
@@ -193,6 +194,7 @@ async function analyze(mode) {
   const timeout = type === "NDPD_ANALYZE_ALL" ? 180000 : 30000;
   setLoading(true, mode === "active" ? "Analisando a seção ativa…" : "Coletando todas as seções…");
   collecting = true;
+  if (idleEl) idleEl.classList.add("hidden");
   showProgress(
     mode === "active" ? "Lendo a seção ativa…" : "Conectando à aba do NDPd…",
     null,
@@ -281,6 +283,7 @@ function hideProgress() {
 }
 
 function renderError(message) {
+  if (idleEl) idleEl.classList.add("hidden");
   resultEl.classList.add("hidden");
   errorEl.classList.remove("hidden");
   errorEl.textContent = "";
@@ -940,5 +943,3 @@ allBtn.addEventListener("click", () => analyze("all"));
 activeBtn.addEventListener("click", () => analyze("active"));
 jsonBtn.addEventListener("click", exportJson);
 csvBtn.addEventListener("click", exportCsv);
-
-analyze("all");
