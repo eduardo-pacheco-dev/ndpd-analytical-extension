@@ -36,11 +36,25 @@ Ideal para print: aumente o zoom do popup se quiser letras maiores, ou use
 ## Diagnóstico
 
 - Console da página (F12 → Console): a extensão loga com o prefixo `[NDPd Analytical]`
-  (registro do content script, cada seção ativada, itens lidos e total).
-- No console da página você pode rodar `window.__ndpdDiagnostics()` para ver versão do
-  content script, se a página foi reconhecida, seções encontradas e a seção ativa.
+  (registro do content script, cada seção/passo ativado com o motivo — `active`,
+  `content-changed`, `assumed-active` — e os campos lidos).
+- `window.__ndpdDiagnostics()` mostra versão, modo detectado (`kind`), itens de navegação com
+  o estado ativo, campos visíveis e **candidatos** (`matStepHeaders`, `tabLabels`, `roleTabs`,
+  `tablists` + amostra de classes) — útil quando algum step não é reconhecido.
 - Console do popup (clique direito no popup → Inspecionar) mostra cada tentativa de
   leitura/injeção e o resumo final.
+
+Se a coleta não avançar entre os passos, rode no console da página:
+
+```js
+window.__ndpdDiagnostics()
+```
+
+e, se possível, colete o HTML do passo atual:
+
+```js
+copy(document.querySelector('.mat-horizontal-stepper-content, .mat-step-content, mat-tab-group')?.outerHTML)
+```
 
 ## O que a análise entrega
 

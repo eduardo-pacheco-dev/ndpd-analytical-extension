@@ -3,7 +3,7 @@
 (function () {
   "use strict";
 
-  const VERSION = 4;
+  const VERSION = 5;
   const PREFIX = "[NDPd Analytical]";
 
   function log(...args) {
@@ -32,39 +32,9 @@
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  function navNodes(doc, kind) {
-    if (kind === "checklist") {
-      return Array.from(doc.querySelectorAll("app-checklist-side-sections .sidebar-item"));
-    }
-    if (kind === "steps") {
-      return Array.from(doc.querySelectorAll("mat-step-header, .mat-step-header"));
-    }
-    if (kind === "tabs") {
-      return Array.from(doc.querySelectorAll("mat-tab-group .mat-tab-label"));
-    }
-    return [];
-  }
-
-  function nodeActive(kind, node) {
-    if (!node) return false;
-    if (kind === "checklist") return node.classList.contains("active");
-    if (kind === "steps") {
-      return (
-        node.classList.contains("mat-step-header-selected") ||
-        node.getAttribute("aria-selected") === "true"
-      );
-    }
-    if (kind === "tabs") {
-      return (
-        node.classList.contains("mat-tab-label-active") ||
-        node.getAttribute("aria-selected") === "true"
-      );
-    }
-    return false;
-  }
-
   function activeIndex(doc, kind) {
-    return navNodes(doc, kind).findIndex((node) => nodeActive(kind, node));
+    const analyzer = window.NdPdAnalyzer;
+    return analyzer.navNodes(doc, kind).findIndex((node) => analyzer.nodeActive(kind, node));
   }
 
   function contentSignature(doc) {
@@ -86,32 +56,38 @@
     return condition();
   }
 
-  function clickElement(node) {
-    const event = new MouseEvent("click", { bubbles: true, cancelable: true, view: window });
-    node.dispatchEvent(event);
+  function fireClick(node) {
+    const options = { bubbles: true, cancelable: true, view: window, composed: true };
+    try {
+      node.dispatchEvent(new MouseEvent("mousedown", options));
+      node.dispatchEvent(new MouseEvent("mouseup", options));
+      node.dispatchEvent(new MouseEvent("click", options));
+    } catch (error) {
+      if (typeof node.click === "function") node.click();
+    }
   }
 
-  async function activate(doc, kind, index) {
-    const node = navNodes(doc, kind)[index];
-    if (!node) return false;
-    if (activeIndex(doc, kind) === index) return true;
-
-    const before = contentSignature(doc);
-    clickElement(node);
-    let activated = await waitFor(() => activeIndex(doc, kind) === index, 2500, 100);
-
-    if (!activated) {
-      const label =
-        node.querySelector(".mat-step-text-label, .mat-step-label, .label, .bold-label, span") || node;
-      clickElement(label);
-      activated = await waitFor(() => activeIndex(doc, kind) === index, 2500, 100);
+  function clickTargets(node) {
+    const targets = [node];
+    const inner = node.querySelector(
+      "[role='tab'], button, .mat-step-text-label, .mat-step-label, .mat-tab-label-content, .label, .bold-label, span"
+    );
+    if (inner) targets.push(inner);
+    if (node.parentElement && node.parentElement.getAttribute) {
+      const role = node.parentElement.getAttribute("role");
+      if (role === "tablist" || node.parentElement.className) targets.push(node.parentElement);
+      const parentRole = node.parentElement.getAttribute("role");
+      if (parentRole === "presentation" && node.parentElement.parentElement) {
+        targets.push(node.parentElement.parentElement);
+      }
     }
-    if (!activated) return false;
+    return targets;
+  }
 
+  async function settleContent(doc, before) {
     if (contentSignature(doc) === before) {
-      await waitFor(() => contentSignature(doc) !== before, 2000, 100);
+      await waitFor(() => contentSignature(doc) !== before, 2500, 100);
     }
-
     let previous = null;
     let stable = 0;
     const start = Date.now();
@@ -126,17 +102,68 @@
       previous = signature;
       await sleep(120);
     }
+  }
 
-    return activeIndex(doc, kind) === index;
+  async function activate(doc, kind, index) {
+    const analyzer = window.NdPdAnalyzer;
+    const node = analyzer.navNodes(doc, kind)[index];
+    if (!node) return { ok: false, reason: "node-not-found" };
+    if (activeIndex(doc, kind) === index) return { ok: true, reason: "already-active" };
+
+    const before = contentSignature(doc);
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      for (const target of clickTargets(node)) {
+        fireClick(target);
+
+        const becameActive = await waitFor(() => activeIndex(doc, kind) === index, 1400, 80);
+        if (becameActive) {
+          await settleContent(doc, before);
+          return { ok: true, reason: "active" };
+        }
+
+        if (contentSignature(doc) !== before) {
+          await settleContent(doc, before);
+          return { ok: true, reason: "content-changed" };
+        }
+      }
+
+      // Keyboard fallback (some custom steppers react to Enter/Space).
+      try {
+        if (typeof node.focus === "function") node.focus();
+        for (const type of ["keydown", "keypress", "keyup"]) {
+          node.dispatchEvent(new KeyboardEvent(type, { key: "Enter", code: "Enter", bubbles: true }));
+        }
+        if (await waitFor(() => activeIndex(doc, kind) === index, 1200, 80)) {
+          await settleContent(doc, before);
+          return { ok: true, reason: "keyboard" };
+        }
+      } catch (error) {
+        /* KeyboardEvent may not exist */
+      }
+
+      await sleep(220);
+    }
+
+    return { ok: false, reason: "could-not-activate" };
   }
 
   async function collectAll(onProgress) {
     const analyzer = window.NdPdAnalyzer;
     const plan = analyzer.planNavigator(document);
-    const originalIndex = activeIndex(document, plan.kind);
+    const initialActive = activeIndex(document, plan.kind);
+    // Some custom steppers don't expose an active marker; assume the first item is rendered.
+    const assumedActive = initialActive >= 0 ? initialActive : 0;
     const collected = [];
 
-    log("iniciando coleta:", plan.kind, "| itens de navegação =", plan.items.length);
+    log(
+      "iniciando coleta:",
+      plan.kind,
+      "| itens de navegação =",
+      plan.items.length,
+      "| ativo detectado =",
+      initialActive
+    );
 
     if (plan.items.length === 0) {
       const captured = analyzer.captureCurrent(document, plan.kind, null);
@@ -148,20 +175,25 @@
           onProgress({ current: index + 1, total: plan.items.length, label: current.label });
         }
 
-        const rendered = await activate(document, plan.kind, index);
+        const activation =
+          index === assumedActive && initialActive < 0
+            ? { ok: true, reason: "assumed-active" }
+            : await activate(document, plan.kind, index);
+
         const fresh = analyzer.planNavigator(document).items[index] || current;
-        const captured = rendered
+        const captured = activation.ok
           ? analyzer.captureCurrent(document, plan.kind, fresh)
           : { items: [], fields: [], attachments: [] };
+
         log(
-          `item ${index + 1}/${plan.items.length} "${current.label}" renderizado=${rendered} campos=${captured.fields.length} itens=${captured.items.length}`
+          `item ${index + 1}/${plan.items.length} "${current.label}" ok=${activation.ok} (${activation.reason}) campos=${captured.fields.length} itens=${captured.items.length}`
         );
-        collected.push({ index, ref: fresh, rendered, ...captured });
+        collected.push({ index, ref: fresh, rendered: activation.ok, ...captured });
       }
 
-      if (originalIndex >= 0 && activeIndex(document, plan.kind) !== originalIndex) {
-        await activate(document, plan.kind, originalIndex);
-        log("posição original restaurada:", originalIndex);
+      if (initialActive >= 0 && activeIndex(document, plan.kind) !== initialActive) {
+        await activate(document, plan.kind, initialActive);
+        log("posição original restaurada:", initialActive);
       }
     }
 
@@ -176,7 +208,7 @@
     return window.NdPdAnalyzer.analyzeDocument(document, window.location);
   }
 
-  window.NdPdScraper = { collectAll, activate, activeIndex, contentSignature, navNodes };
+  window.NdPdScraper = { collectAll, activate, activeIndex, contentSignature };
 
   function handleMessage(message, _sender, sendResponse) {
     if (!message) return undefined;
@@ -222,13 +254,25 @@
   window.__ndpdDiagnostics = function () {
     const analyzer = window.NdPdAnalyzer;
     const plan = analyzer ? analyzer.planNavigator(document) : { kind: "unknown", items: [] };
+    const sample = Array.from(document.querySelectorAll("[class*='step'], [class*='wizard'], [role='tab']"))
+      .filter((node) => node.closest && !node.closest(".cdk-overlay-pane, [role='menu']"))
+      .slice(0, 12)
+      .map((node) => node.tagName.toLowerCase() + "." + String(node.className || "").split(" ").slice(0, 2).join("."));
     const info = {
       version: VERSION,
       url: location.href,
       kind: plan.kind,
-      navigatorItems: plan.items.map((item) => item.label),
-      fields: analyzer ? analyzer.readFields(analyzer.activeContentScope(document)).length : 0,
+      navigatorItems: plan.items.map((item) => ({ label: item.label, active: item.active })),
+      activeIndex: activeIndex(document, plan.kind),
+      fieldsInView: analyzer ? analyzer.readFields(analyzer.activeContentScope(document)).length : 0,
       checklistItems: document.querySelectorAll(".checklist .content-body .content-item").length,
+      candidates: {
+        matStepHeaders: document.querySelectorAll("mat-step-header, .mat-step-header").length,
+        tabLabels: document.querySelectorAll(".mat-tab-label").length,
+        roleTabs: document.querySelectorAll("[role='tab']").length,
+        tablists: document.querySelectorAll("[role='tablist']").length,
+        samples: sample,
+      },
     };
     console.info(PREFIX, "diagnóstico", info);
     return info;

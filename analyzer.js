@@ -301,20 +301,68 @@
 
   // --------------------------------------------------------------------- form
 
+  const NAV_SELECTORS = {
+    checklist: ["app-checklist-side-sections .sidebar-item"],
+    steps: [
+      "mat-step-header",
+      "[role='tablist'] [role='tab']",
+      ".mat-tab-group .mat-tab-label",
+      ".mat-stepper-horizontal .mat-step-header",
+      ".mat-stepper-vertical .mat-step-header",
+    ],
+    tabs: ["mat-tab-group .mat-tab-label", "[role='tablist'] [role='tab']"],
+  };
+
+  function navNodes(doc, kind) {
+    const selectors = NAV_SELECTORS[kind] || [];
+    const found = [];
+    for (const selector of selectors) {
+      for (const node of doc.querySelectorAll(selector)) found.push(node);
+    }
+    const unique = [];
+    for (const node of found) {
+      if (node.closest && node.closest("[role='menu'], .mat-menu-panel, .cdk-overlay-pane, mat-menu")) continue;
+      if (unique.some((kept) => kept === node || kept.contains(node))) continue;
+      unique.push(node);
+    }
+    return unique;
+  }
+
+  function hasActiveMarker(node) {
+    if (!node) return false;
+    const className = String(node.className || "");
+    if (/(^|[\s-])(active|selected|current)([\s-]|$)/i.test(className)) return true;
+    if (node.getAttribute && node.getAttribute("aria-selected") === "true") return true;
+    const current = node.getAttribute && node.getAttribute("aria-current");
+    if (current === "true" || current === "step" || current === "page") return true;
+    if (node.getAttribute && node.getAttribute("aria-expanded") === "true") return true;
+    if (
+      node.querySelector &&
+      node.querySelector(".mat-step-label-active, .mat-tab-label-active, .mat-step-header-selected")
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  function nodeActive(_kind, node) {
+    return hasActiveMarker(node);
+  }
+
   function readSteps(doc) {
-    const headers = Array.from(doc.querySelectorAll("mat-step-header, .mat-step-header"));
-    return headers
-      .map((header, index) => {
-        const labelEl = header.querySelector(".mat-step-text-label, .mat-step-label");
-        const label = clean(labelEl ? labelEl.textContent : header.textContent);
+    const nodes = navNodes(doc, "steps");
+    return nodes
+      .map((node, index) => {
+        const labelEl = node.querySelector(
+          ".mat-step-text-label, .mat-step-label, .mat-tab-label-content, .label, .bold-label"
+        );
+        const label = cleanLabel(labelEl ? labelEl.textContent : node.textContent);
         return {
           index,
           code: String(index + 1),
           name: label,
           label: label ? index + 1 + ". " + label : "Passo " + (index + 1),
-          active:
-            header.classList.contains("mat-step-header-selected") ||
-            header.getAttribute("aria-selected") === "true",
+          active: nodeActive("steps", node),
           kind: "step",
           counts: null,
           rendered: false,
@@ -324,18 +372,22 @@
   }
 
   function readTabs(doc) {
-    const labels = Array.from(doc.querySelectorAll("mat-tab-group .mat-tab-label"));
-    return labels
-      .map((label, index) => ({
-        index,
-        code: String(index + 1),
-        name: clean(label.textContent),
-        label: clean(label.textContent),
-        active: label.classList.contains("mat-tab-label-active") || label.getAttribute("aria-selected") === "true",
-        kind: "tab",
-        counts: null,
-        rendered: false,
-      }))
+    const nodes = navNodes(doc, "tabs");
+    return nodes
+      .map((node, index) => {
+        const labelEl = node.querySelector(".mat-tab-label-content, .label");
+        const label = cleanLabel(labelEl ? labelEl.textContent : node.textContent);
+        return {
+          index,
+          code: String(index + 1),
+          name: label,
+          label,
+          active: nodeActive("tabs", node),
+          kind: "tab",
+          counts: null,
+          rendered: false,
+        };
+      })
       .filter((tab) => tab.name);
   }
 
@@ -891,6 +943,9 @@
     planNavigator,
     captureCurrent,
     activeContentScope,
+    navNodes,
+    nodeActive,
+    hasActiveMarker,
     readSections,
     readSteps,
     readTabs,
