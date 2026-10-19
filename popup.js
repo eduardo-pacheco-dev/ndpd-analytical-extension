@@ -66,6 +66,10 @@ const csvBtn = document.getElementById("export-csv");
 const refreshBtn = document.getElementById("refresh");
 const activeBtn = document.getElementById("analyze-active");
 const allBtn = document.getElementById("analyze-all");
+const progressEl = document.getElementById("progress");
+const progressFillEl = document.getElementById("progress-fill");
+const progressPathEl = document.getElementById("progress-path");
+const progressPctEl = document.getElementById("progress-pct");
 
 let currentResult = null;
 let collecting = false;
@@ -189,6 +193,11 @@ async function analyze(mode) {
   const timeout = type === "NDPD_ANALYZE_ALL" ? 180000 : 30000;
   setLoading(true, mode === "active" ? "Analisando a seção ativa…" : "Coletando todas as seções…");
   collecting = true;
+  showProgress(
+    mode === "active" ? "Lendo a seção ativa…" : "Conectando à aba do NDPd…",
+    null,
+    { indeterminate: true }
+  );
 
   try {
     const tab = await getActiveTab();
@@ -219,11 +228,13 @@ async function analyze(mode) {
 
     currentResult = data;
     render(data);
+    showProgress("Coleta concluída", 100, { done: true });
     setLoading(false, "Análise atualizada às " + new Date().toLocaleTimeString("pt-BR"));
     console.info("[NDPd Analytical] relatório pronto:", JSON.stringify(data.summary));
   } catch (error) {
     currentResult = null;
     renderError(error.message || String(error));
+    hideProgress();
     setLoading(false, "Falha na análise");
     console.warn("[NDPd Analytical] falha:", error.message || String(error));
   } finally {
@@ -238,6 +249,35 @@ function setLoading(isLoading, message) {
   jsonBtn.disabled = isLoading || !currentResult;
   csvBtn.disabled = isLoading || !currentResult;
   if (message) statusEl.textContent = message;
+}
+
+// Estimates an overall completion (0-99%) from the nested level trail
+// (e.g. wizard step 2/5, section 1/3), plus the item currently being processed.
+function overallPercent(trail) {
+  if (!trail || !trail.length) return 0;
+  let cum = 1;
+  let sum = 0;
+  for (const level of trail) {
+    cum *= Math.max(1, level.total || 1);
+    sum += Math.max(0, (level.current || 1) - 1) / cum;
+  }
+  sum += 0.5 / cum;
+  return Math.min(99, Math.round(sum * 100));
+}
+
+function showProgress(path, percent, options) {
+  const opts = options || {};
+  progressEl.classList.remove("hidden");
+  progressEl.classList.toggle("indeterminate", Boolean(opts.indeterminate));
+  progressEl.classList.toggle("done", Boolean(opts.done));
+  progressPathEl.textContent = path || "Coletando…";
+  progressPctEl.textContent = opts.indeterminate ? "…" : percent != null ? percent + "%" : "";
+  progressFillEl.style.width = opts.indeterminate ? "35%" : percent != null ? percent + "%" : "0%";
+}
+
+function hideProgress() {
+  progressEl.classList.add("hidden");
+  progressEl.classList.remove("indeterminate", "done");
 }
 
 function renderError(message) {
@@ -885,10 +925,14 @@ chrome.runtime.onMessage.addListener((message) => {
   const progress = message.progress || {};
   if (progress.done) {
     statusEl.textContent = "Montando relatório…";
+    showProgress("Montando relatório…", 100, { done: true });
     return;
   }
+  const percent = overallPercent(progress.trail);
+  const depthLabel = progress.depth ? "nível " + (progress.depth + 1) + " · " : "";
   statusEl.textContent =
-    "Coletando seção " + progress.current + "/" + progress.total + ": " + (progress.label || "");
+    "Coletando (" + progress.current + "/" + progress.total + "): " + (progress.label || "");
+  showProgress(depthLabel + (progress.label || ""), percent);
 });
 
 refreshBtn.addEventListener("click", () => analyze("all"));

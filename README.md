@@ -18,6 +18,9 @@ servidor externo**, o que permite funcionar em sistema fechado.
 O popup é o próprio dashboard visual (480px), com gráficos em SVG/CSS puro, sem
 bibliotecas externas:
 
+- **barra de progresso da coleta** logo abaixo do cabeçalho: mostra o caminho atual
+  (ex.: `nível 2 · 3. FCC & Baterias › 3.1 FCC`), o percentual geral estimado a partir da
+  trilha de níveis (wizard → seção → ...) e fica verde/100% ao concluir;
 - **4 KPIs**: itens, aceitos, rejeitados e pendentes (em 2 colunas);
 - **donut** de status com percentual de aceite e legenda;
 - **barras empilhadas** de progresso por seção (aceitos/pendentes/rejeitados/outros);

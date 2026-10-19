@@ -168,8 +168,9 @@
   }
 
   // Recursively walks navigators (outer wizard, inner checklist, ...) and captures leaves.
-  async function collectScope(root, prefix, used, entries, onProgress, depth) {
+  async function collectScope(root, prefix, used, entries, onProgress, depth, trail) {
     const analyzer = window.NdPdAnalyzer;
+    const levels = trail || [];
 
     if (depth > MAX_DEPTH) {
       const ref = { label: prefix || "Conteúdo", name: prefix || "Conteúdo", code: prefix || "" };
@@ -195,10 +196,22 @@
         (prefix ? ` dentro de "${prefix}"` : "")
     );
 
+    const level = { current: 1, total: nav.items.length };
+    levels.push(level);
+
     for (let index = 0; index < nav.items.length; index += 1) {
       const item = nav.items[index];
       const label = combineLabel(prefix, item.label);
-      if (onProgress) onProgress({ current: index + 1, total: nav.items.length, label });
+      level.current = index + 1;
+      if (onProgress) {
+        onProgress({
+          current: index + 1,
+          total: nav.items.length,
+          label,
+          depth,
+          trail: levels.map((entry) => ({ current: entry.current, total: entry.total })),
+        });
+      }
 
       const activation =
         index === assumed && initialActive < 0
@@ -210,7 +223,7 @@
       const child = chosen.child;
 
       if (activation.ok && scope && child && child.items.length > 0) {
-        await collectScope(scope, label, used, entries, onProgress, depth + 1);
+        await collectScope(scope, label, used, entries, onProgress, depth + 1, levels);
         continue;
       }
 
@@ -233,6 +246,8 @@
       entries.push({ index: entries.length, ref, rendered: activation.ok, ...captured });
     }
 
+    levels.pop();
+
     if (initialActive >= 0 && activeIndex(root, nav.kind) !== initialActive) {
       await activate(root, nav.kind, initialActive);
       log(`${"  ".repeat(depth)}nível ${depth} restaurado no item ${initialActive}.`);
@@ -249,7 +264,7 @@
       top ? top.kind + "/" + top.items.length : "nenhum"
     );
 
-    await collectScope(document, "", new Set(), entries, onProgress, 0);
+    await collectScope(document, "", new Set(), entries, onProgress, 0, []);
 
     if (onProgress) onProgress({ current: 1, total: 1, done: true });
 
